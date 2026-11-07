@@ -232,6 +232,17 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                     } else {
                         true
                     };
+                    let macos_signer_ready = if spec.os == "macos" {
+                        let signer = check_any_tool(
+                            &["rcodesign", "codesign"],
+                            "install rcodesign: cargo install apple-codesign",
+                        );
+                        let ready = signer.available;
+                        tools.push(signer);
+                        ready
+                    } else {
+                        true
+                    };
                     if !std_installed && !rust_src {
                         (
                             ReadinessStatus::Blocked,
@@ -259,6 +270,19 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                                 "building Rust std for Windows needs llvm-dlltool and llvm-ar"
                                     .to_string(),
                             ),
+                        )
+                    } else if !macos_signer_ready {
+                        (
+                            ReadinessStatus::Blocked,
+                            Some(
+                                "macOS artifacts need ad-hoc signing; install rcodesign with `cargo install apple-codesign`"
+                                    .to_string(),
+                            ),
+                        )
+                    } else if spec.os == "macos" {
+                        (
+                            ReadinessStatus::Ready,
+                            Some("builds and ad-hoc signs a Mach-O artifact for macOS".to_string()),
                         )
                     } else if spec.os == "wasi" {
                         let wasmtime =
@@ -617,19 +641,32 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_target_is_reported() {
+    fn macos_target_reports_actionable_readiness() {
         let Some(host) = target::host() else {
             return;
         };
-        let root = rust_project("plan-unsupported");
+        if host.id == "macos-arm64" {
+            return;
+        }
+        let root = rust_project("plan-macos");
         let report = detect::detect(&root, 4).unwrap();
         let config = Config::default();
         let macos = target::by_id("macos-arm64").unwrap();
         let plan = build_plan(&root, &config, &report, &[macos]).unwrap();
-        assert_eq!(
-            plan.targets[0].readiness.status,
-            ReadinessStatus::Unsupported
-        );
-        let _ = host;
+        let readiness = &plan.targets[0].readiness;
+        assert!(readiness.cross);
+        match readiness.status {
+            ReadinessStatus::Ready => {}
+            ReadinessStatus::Blocked => {
+                let reason = readiness.reason.as_deref().unwrap_or_default();
+                assert!(
+                    ["rust-src", "Zig", "rcodesign", "cargo"]
+                        .iter()
+                        .any(|needle| reason.contains(needle)),
+                    "blocked without an actionable reason: {reason}"
+                );
+            }
+            ref other => panic!("unexpected macOS readiness: {other:?}"),
+        }
     }
 }

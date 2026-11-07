@@ -117,13 +117,13 @@ pub const TARGETS: &[TargetSpec] = &[
         os: "macos",
         arch: "aarch64",
         abi: "darwin",
-        tier: Tier::Unsupported,
+        tier: Tier::Tier2,
         llvm_triple: "aarch64-apple-darwin",
         rust_triple: "aarch64-apple-darwin",
         flint_triple: "aarch64-apple-darwin",
         zig_triple: "aarch64-macos",
         binary_format: "Mach-O",
-        notes: "Requires a licensed Apple SDK/worker; excluded from 0.1",
+        notes: "Cross-built with Zig and ad-hoc signed with rcodesign; run on macOS",
     },
     TargetSpec {
         id: "wasm32-wasi",
@@ -176,6 +176,7 @@ pub fn host() -> Option<&'static TargetSpec> {
         ("linux", "aarch64") => "linux-aarch64",
         ("linux", "x86_64") => "linux-x86_64",
         ("windows", "x86_64") => "windows-x86_64",
+        ("macos", "aarch64") => "macos-arm64",
         _ => return None,
     };
     by_id(id)
@@ -223,9 +224,9 @@ mod tests {
     fn experimental_filter_works() {
         let stable = supported_ids(false);
         assert!(!stable.contains(&"wasm32-wasi"));
-        assert!(!stable.contains(&"macos-arm64"));
+        assert!(stable.contains(&"macos-arm64"));
         let all_supported = supported_ids(true);
         assert!(all_supported.contains(&"wasm32-wasi"));
-        assert!(!all_supported.contains(&"macos-arm64"));
+        assert!(all_supported.contains(&"macos-arm64"));
     }
 }

@@ -384,7 +384,11 @@ Worker types:
 
 * Optional emulator or virtualized test worker.
 
-macOS support must respect Apple's SDK, hardware and distribution requirements. We should use properly licensed macOS workers for the relevant build and signing operations rather than promise unrestricted macOS cross-building.
+macOS support must respect Apple's SDK, hardware and distribution requirements. The 0.1
+implementation cross-links with Zig and ad-hoc signs with `rcodesign`, which is enough for
+local execution on macOS. App Store, notarized and other Apple-issued distribution paths
+still require a compliant macOS worker and Apple signing identities; we should not promise
+unrestricted macOS distribution from Termux.
 
 ### 7\. CLI design
 
@@ -808,7 +812,7 @@ The key principle: OmniBuild should improve Flint's build experience without tak
 
 ### 14\. Development roadmap
 
-I would build this in eight phases. The timeline below is a realistic planning estimate for a focused small team or a solo developer using AI coding agents; it is not a guaranteed delivery date.
+I would build this in nine phases. The timeline below is a realistic planning estimate for a focused small team or a solo developer using AI coding agents; it is not a guaranteed delivery date.
 
 * Phase 0 — Technical foundation
 
@@ -935,6 +939,26 @@ I would build this in eight phases. The timeline below is a realistic planning e
     * Publish support matrix, documentation and security policy.
 
     Exit condition: External developers can reliably use OmniBuild without needing the creator to configure each project manually.
+
+* Phase 8 — One-command installation and package distribution
+
+    * Publish signed release archives with `SHA256SUMS` for every supported host.
+
+    * Add a Termux `pkg` recipe and document `pkg install omnibuild`.
+
+    * Publish Debian/Ubuntu `.deb` packages and an apt repository for `apt install omnibuild`.
+
+    * Publish a macOS Homebrew formula for `brew install omnibuild`.
+
+    * Publish Windows packages for `winget`, `scoop` and `choco`.
+
+    * Support `cargo install omnibuild` once crates.io publishing is approved.
+
+    * Keep installation and upgrade verification in CI: install the published package,
+      run `omnibuild --version`, then run `omnibuild doctor`.
+
+    Exit condition: A new user can install OmniBuild with one documented command on
+    Termux, Debian/Ubuntu, macOS and Windows, and CI proves the installed binary runs.
 
 ### What we should build first
 
@@ -1200,7 +1224,7 @@ not glibc.
 | linux-x86_64-musl | linux | x86_64 | musl | tier1 | x86_64-unknown-linux-musl | x86_64-unknown-linux-musl | x86_64-unknown-linux-musl | ELF |
 | linux-aarch64 | linux | aarch64 | gnu | tier1 | aarch64-unknown-linux-gnu | aarch64-unknown-linux-gnu | aarch64-unknown-linux-gnu | ELF |
 | windows-x86_64 | windows | x86_64 | gnu | tier2 | x86_64-w64-windows-gnu | x86_64-pc-windows-gnu | x86_64-windows-gnu | PE/COFF |
-| macos-arm64 | macos | aarch64 | darwin | unsupported | aarch64-apple-darwin | aarch64-apple-darwin | aarch64-apple-darwin | Mach-O |
+| macos-arm64 | macos | aarch64 | darwin | tier2 | aarch64-apple-darwin | aarch64-apple-darwin | aarch64-apple-darwin | Mach-O |
 | wasm32-wasi | wasi | wasm32 | wasi | tier3 | wasm32-unknown-wasi | wasm32-wasip1 | wasm32-unknown-wasi | WebAssembly |
 | linux-riscv64 | linux | riscv64 | gnu | tier3 | riscv64-unknown-linux-gnu | riscv64gc-unknown-linux-gnu | riscv64-unknown-linux-gnu | ELF |
 
@@ -1390,7 +1414,8 @@ Remaining:
 
 - Dashboard, accounts, billing, hosted workers.
 - Remote worker protocol and scheduling.
-- macOS support (requires licensed Apple SDK/worker).
+- macOS notarization and App Store distribution (requires a compliant macOS worker and
+  Apple signing identities). Ad-hoc-signed macOS builds are implemented.
 - Go, Java, .NET, JavaScript, Python and Swift adapters.
 - Broader Flint WASI runtime coverage (commands, signals, threads).
 
@@ -1424,6 +1449,7 @@ omnibuild/
 │       ├── flint-hello/
 │       └── rust-hello/
 ├── .github/workflows/ci.yml
+├── scripts/run-macos.sh     # quarantine removal, ad-hoc signing and execution
 ├── .gitignore
 └── target/                 # build output, not committed
 ```
@@ -1438,7 +1464,8 @@ omnibuild/
 - Flint cross-link is implemented for Linux x86_64/aarch64 and WASI. Windows and
   riscv64 Flint targets are not implemented.
 - Windows artifacts can be inspected but not executed here.
-- macOS is excluded from 0.1.
+- macOS ARM64 artifacts are cross-built and ad-hoc signed here; execution is verified on
+  macOS, not on this Termux device.
 - The cache is local and artifact-based; shared/remote caches, compiler
   intermediate caching, remote workers and the dashboard are not implemented.
 - Cache keys hash the whole project tree, so generated files outside `dist/` and

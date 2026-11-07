@@ -154,6 +154,11 @@ impl Adapter for CargoAdapter {
             )
         })?;
 
+        let mut commands = vec![command];
+        if context.target.os == "macos" {
+            commands.push(sign_macos_artifact(context, &destination)?);
+        }
+
         let mut versions = BTreeMap::new();
         if let Some(version) = toolchain::version_of("cargo", &["--version"]) {
             versions.insert("cargo".to_string(), version);
@@ -164,10 +169,18 @@ impl Adapter for CargoAdapter {
         if build_std {
             versions.insert("rust_std".to_string(), "built from rust-src".to_string());
         }
+        if context.target.os == "macos" {
+            for signer in ["rcodesign", "codesign"] {
+                if let Some(version) = toolchain::version_of(signer, &["--version"]) {
+                    versions.insert(signer.to_string(), version);
+                    break;
+                }
+            }
+        }
 
         Ok(BuildResult {
             artifact: destination,
-            commands: vec![command],
+            commands,
             toolchain: versions,
         })
     }
@@ -961,6 +974,53 @@ fn write_cross_linker(context: &BuildContext<'_>) -> Result<String> {
         .with_context(|| format!("cannot write linker wrapper {}", link.display()))?;
     make_executable(&link)?;
     Ok(link.display().to_string())
+}
+
+fn sign_macos_artifact(context: &BuildContext<'_>, artifact: &Path) -> Result<CommandOutput> {
+    let artifact = artifact.to_string_lossy().to_string();
+    let rcodesign = toolchain::check_tool("rcodesign", None, Some("cargo install apple-codesign"));
+    let (program, args, log_name) = if let Some(program) = rcodesign.path {
+        (program, vec!["sign".to_string(), artifact], "rcodesign.log")
+    } else if std::env::consts::OS == "macos" {
+        let codesign = toolchain::check_tool("codesign", None, None);
+        let Some(program) = codesign.path else {
+            bail!("macOS artifact signing needs rcodesign or codesign");
+        };
+        (
+            program,
+            vec![
+                "--force".to_string(),
+                "--sign".to_string(),
+                "-".to_string(),
+                artifact,
+            ],
+            "codesign.log",
+        )
+    } else {
+        bail!(
+            "macOS artifacts need ad-hoc signing; install rcodesign with `cargo install apple-codesign`"
+        );
+    };
+
+    let mut spec = CommandSpec::new(program, context.root);
+    for arg in args {
+        spec.arg(arg);
+    }
+    spec.timeout(context.timeout);
+    let log_path = context.work_dir.join(log_name);
+    let command = exec::run(&spec, &log_path)?;
+    if !command.success {
+        bail!(
+            "macOS ad-hoc signing failed{}; see {}",
+            if command.timed_out {
+                " (timed out)"
+            } else {
+                ""
+            },
+            log_path.display()
+        );
+    }
+    Ok(command)
 }
 
 fn write_windows_binutils(context: &BuildContext<'_>) -> Result<Option<String>> {

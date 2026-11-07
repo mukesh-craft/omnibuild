@@ -29,6 +29,12 @@ pub fn run() -> DoctorReport {
         ),
         ("qemu-x86_64", None, Some("pkg install qemu-user-x86-64")),
         ("wasmtime", None, Some("pkg install wasmtime")),
+        (
+            "rcodesign",
+            None,
+            Some("cargo install apple-codesign --locked"),
+        ),
+        ("codesign", None, None),
         ("tar", None, Some("pkg install tar")),
         ("zip", None, Some("pkg install zip")),
         ("ld.lld", None, None),

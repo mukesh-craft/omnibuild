@@ -46,10 +46,10 @@ is a promise about an untested platform.
 | Project detection | Cargo, CMake and Flint projects, including monorepo scans. Marker-only detection also recognises Go, npm, Maven, Gradle, SwiftPM and dotnet projects. |
 | Build planning | Target readiness, native vs cross reporting, missing-tool hints, per-target triples, and a `--all` view. |
 | Native builds | Cargo, CMake and Flint on the host target. |
-| Cargo cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Linux riscv64, Windows x86-64 and WASI (`wasm32-wasi`). Uses the installed target std or falls back to `-Z build-std` with `rust-src`; Zig handles linking. |
+| Cargo cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Linux riscv64, Windows x86-64, macOS ARM64 and WASI (`wasm32-wasi`). Uses the installed target std or falls back to `-Z build-std` with `rust-src`; Zig handles linking and `rcodesign` ad-hoc signs Mach-O artifacts. |
 | CMake cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Windows x86-64, Linux riscv64 and WASI (`wasm32-wasi`) through Zig compiler/archiver wrappers and a generated CMake toolchain file. |
 | Flint cross-builds | Linux x86-64 and Linux aarch64 through `flintc` plus Zig-compiled Flint runtime sources. Flint WASI uses LLVM IR plus a small POSIX shim and Zig's WASI libc. |
-| Artifact inspection | Verified for ELF, PE/COFF and WebAssembly: format, architecture, executable kind, size and SHA-256. Mach-O objects can be parsed, but macOS is not a supported target. |
+| Artifact inspection | Verified for ELF, PE/COFF, WebAssembly and Mach-O: format, architecture, executable kind, size and SHA-256. macOS artifacts are ad-hoc signed so they can run on a Mac. |
 | Runtime smoke test | Runs native artifacts directly, `linux-x86_64-musl` through `qemu-x86_64`, and WASI artifacts through `wasmtime`. A non-running artifact is never reported as executed. |
 | Local cache | Implemented and tested: content-addressed cache of successful final artifacts. Cache hits restore, re-hash, re-verify and, when execution is enabled, re-run the artifact with zero build commands. |
 | Packaging | Implemented and tested: per-target `.tar.gz` and `.zip` archives with the artifact, target manifest, release manifest and `SHA256SUMS`; plus a package manifest and top-level checksums. |
@@ -72,14 +72,15 @@ support claims.
 | `windows-x86_64` | 2 | Cargo, CMake | Inspected; no runtime on this device |
 | `linux-riscv64` | 3 | Cargo, CMake | Inspected; experimental |
 | `wasm32-wasi` | 3 | Cargo, CMake, Flint | Executed with wasmtime |
-| `macos-arm64` | Unsupported | None | Excluded from 0.1 |
+| `macos-arm64` | 2 | Cargo | Built, ad-hoc signed and Mach-O inspected; run it on macOS |
 
 Cargo cross-compilation uses the installed target `std` when present; otherwise OmniBuild
 builds `std` from `rust-src` (`RUSTC_BOOTSTRAP=1`, `-Z build-std=std,panic_abort`).
 Cross-linking goes through Zig. Windows build-std additionally needs `llvm-dlltool` and
-`llvm-ar`. `--all` means every supported registry entry, including experimental ones; it
-does not mean every entry can execute. Flint WASI works for the verified fixture and
-runtime, with the limitations listed below.
+`llvm-ar`. macOS builds use Zig for linking and `rcodesign` (`cargo install
+apple-codesign --locked`) for ad-hoc signing. `--all` means every supported registry
+entry, including experimental ones; it does not mean every entry can execute. Flint WASI
+works for the verified fixture and runtime, with the limitations listed below.
 
 ## What OmniBuild is not
 
@@ -98,12 +99,14 @@ Being explicit here is more useful than a longer feature list.
   caching, shared caches and cross-platform CI are not implemented.
 - **Not every Rust target.** Cargo cross-builds cover the registry entries listed above,
   not the whole Rust target universe. Standard-library builds can take several minutes the
-  first time. Windows is inspect-only here and macOS is unsupported.
+  first time. Windows is inspect-only here; macOS builds are ad-hoc signed and must be
+  run on macOS.
 - **Not a complete Flint WASI runtime.** Flint WASI compiles and runs the verified
   fixture. `flint_command`/`flint_command_output` return `ENOSYS`; signal, process-clock
   and pthread behavior is emulated or limited.
-- **Not a source of platform claims.** Windows is inspect-only here and macOS is
-  unsupported. WASI is executed with wasmtime and reported as such.
+- **Not a source of platform claims.** Windows is inspect-only here. macOS artifacts are
+  built and ad-hoc signed here but must be run on macOS. WASI is executed with wasmtime
+  and reported as such.
 
 ## Quick start
 
@@ -136,6 +139,33 @@ Download them from the
 and check `SHA256SUMS`. The Windows archive is built and inspected as PE/COFF here but
 has not been executed on Windows. There is no crates.io release yet.
 
+### Planned one-command installs
+
+These package-manager paths are planned, not published yet:
+
+```bash
+# Termux
+pkg install omnibuild
+
+# Debian/Ubuntu
+sudo apt install omnibuild
+
+# macOS
+brew install omnibuild
+
+# Windows
+winget install omnibuild
+scoop install omnibuild
+choco install omnibuild
+
+# Any Rust host, after crates.io publishing
+cargo install omnibuild
+```
+
+The planned order is Termux `pkg`, Debian/Ubuntu apt, Homebrew, then Windows package
+managers. Each package must pass an install-and-run check in CI before it is documented as
+available.
+
 ### Self-hosting
 
 The `v0.1.0` archives are self-hosted. OmniBuild built this project from a clean
@@ -148,8 +178,28 @@ The `v0.1.0` archives are self-hosted. OmniBuild built this project from a clean
   PE/COFF only.
 
 This is a self-hosting check, not a bit-for-bit reproducibility guarantee. The Windows PE
-hash differs between the manual build and the self-hosted build, so Windows releases remain
-inspect-only until they can be exercised on a Windows host.
+hash differs from the earlier manual build for two known reasons: the manual PE predates
+the `70765e8` path-canonicalization fix, and it forced
+`CARGO_PROFILE_RELEASE_LTO=false` while OmniBuild follows `Cargo.toml`'s `lto = "thin"`.
+Rebuilding the same `e3a09b4` source with LTO disabled produced `dedbc2d9…` at 3,055,104
+bytes; the thin-LTO self-host build produced `6a80dbc6…` at 2,274,816 bytes. The size
+change is the LTO setting; the exact manual hash also includes the older source. This is
+not evidence of build nondeterminism. Windows releases remain inspect-only until they can
+be exercised on a Windows host.
+
+### Build for macOS from Termux
+
+macOS builds use Zig for linking and `rcodesign` for ad-hoc signing:
+
+```bash
+cargo install apple-codesign --locked --no-default-features
+omnibuild release --path . --target macos-arm64
+./scripts/run-macos.sh ./dist/<project>/macos-arm64/<artifact> --version
+```
+
+Run `scripts/run-macos.sh` on the Mac. It removes the quarantine attribute, applies an
+ad-hoc signature if needed, and executes the artifact. The macOS CI job runs the same
+script against a native build.
 
 ### Try it on a project
 
@@ -374,9 +424,10 @@ Deferred, not implemented:
 - Remote workers, scheduling, accounts, billing and a dashboard.
 - Go, Java, .NET, JavaScript, Python and Swift adapters.
 - Real test-suite execution and a `tested` verification level.
-- Windows runtime verification and macOS support.
+- Windows runtime verification; macOS execution on a native Mac or macOS CI runner.
 - Broader Flint WASI runtime coverage (commands, signals, threads).
-- Package-manager distribution.
+- Package-manager distribution: Termux `pkg`, apt, PowerShell (`winget`/`scoop`/`choco`)
+  and macOS Homebrew.
 
 ## Contributing
 
