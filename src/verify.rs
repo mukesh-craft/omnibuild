@@ -83,9 +83,11 @@ pub fn inspect(path: &Path, target: &TargetSpec) -> Result<Inspection> {
                 passed: target.arch == artifact.architecture,
                 detail: format!("expected {}, got {}", target.arch, artifact.architecture),
             });
+            let executable = matches!(object.kind(), ObjectKind::Executable | ObjectKind::Dynamic)
+                || object.format() == BinaryFormat::Wasm;
             checks.push(VerificationCheck {
                 name: "executable kind".to_string(),
-                passed: matches!(object.kind(), ObjectKind::Executable | ObjectKind::Dynamic),
+                passed: executable,
                 detail: artifact.kind.clone(),
             });
         }

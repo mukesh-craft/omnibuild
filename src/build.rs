@@ -336,6 +336,16 @@ fn runtime_command(spec: &TargetSpec, artifact: &Path, cwd: &Path) -> Option<Com
         }
     }
 
+    if spec.os == "wasi" {
+        let wasmtime = toolchain::check_tool("wasmtime", None, None);
+        if let Some(wasmtime_path) = wasmtime.path {
+            let mut command = CommandSpec::new(PathBuf::from(wasmtime_path), cwd);
+            command.arg("run");
+            command.arg(artifact.display().to_string());
+            return Some(command);
+        }
+    }
+
     None
 }
 

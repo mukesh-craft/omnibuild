@@ -340,6 +340,150 @@ fn package_writes_verified_tar_and_zip_archives() {
 }
 
 #[test]
+fn release_builds_and_executes_wasm_cargo_target_when_tools_are_available() {
+    if which::which("cargo").is_err() || which::which("wasmtime").is_err() {
+        return;
+    }
+    if !rust_std_available("wasm32-wasip1") {
+        return;
+    }
+
+    let dir = temp_project("release-wasm-rust");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::copy(fixture("rust-hello/Cargo.toml"), dir.join("Cargo.toml")).unwrap();
+    fs::copy(fixture("rust-hello/Cargo.lock"), dir.join("Cargo.lock")).unwrap();
+    fs::copy(fixture("rust-hello/src/main.rs"), dir.join("src/main.rs")).unwrap();
+
+    let output = run(&[
+        "release",
+        "--path",
+        dir.to_str().unwrap(),
+        "--target",
+        "wasm32-wasi",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let result = &report["build"]["results"][0];
+    assert_eq!(result["target"], "wasm32-wasi");
+    assert_eq!(result["adapter"], "cargo");
+    assert_eq!(result["status"], "success");
+    assert_eq!(result["level"], "executed");
+    assert_eq!(result["artifact"]["format"], "WebAssembly");
+    assert_eq!(result["artifact"]["architecture"], "wasm32");
+    assert_eq!(result["run"]["success"], true);
+    let artifact = result["artifact"]["path"].as_str().expect("artifact path");
+    assert!(
+        artifact.ends_with(".wasm"),
+        "unexpected artifact: {artifact}"
+    );
+    assert!(Path::new(artifact).is_file());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn release_builds_and_executes_rust_cross_target_when_tools_are_available() {
+    for tool in ["cargo", "zig", "qemu-x86_64"] {
+        if which::which(tool).is_err() {
+            return;
+        }
+    }
+    if !rust_src_available() {
+        return;
+    }
+
+    let dir = temp_project("release-rust-cross");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::copy(fixture("rust-hello/Cargo.toml"), dir.join("Cargo.toml")).unwrap();
+    fs::copy(fixture("rust-hello/Cargo.lock"), dir.join("Cargo.lock")).unwrap();
+    fs::copy(fixture("rust-hello/src/main.rs"), dir.join("src/main.rs")).unwrap();
+
+    let output = run(&[
+        "release",
+        "--path",
+        dir.to_str().unwrap(),
+        "--target",
+        "linux-x86_64-musl",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let result = &report["build"]["results"][0];
+    assert_eq!(result["target"], "linux-x86_64-musl");
+    assert_eq!(result["adapter"], "cargo");
+    assert_eq!(result["status"], "success");
+    assert_eq!(result["level"], "executed");
+    assert_eq!(result["artifact"]["format"], "ELF");
+    assert_eq!(result["artifact"]["architecture"], "x86_64");
+    assert_eq!(result["run"]["success"], true);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn release_builds_and_executes_wasm_cmake_target_when_tools_are_available() {
+    for tool in ["cmake", "zig", "wasmtime"] {
+        if which::which(tool).is_err() {
+            return;
+        }
+    }
+
+    let dir = temp_project("release-wasm-cmake");
+    fs::copy(
+        fixture("c-hello/CMakeLists.txt"),
+        dir.join("CMakeLists.txt"),
+    )
+    .unwrap();
+    fs::copy(fixture("c-hello/main.c"), dir.join("main.c")).unwrap();
+
+    let output = run(&[
+        "release",
+        "--path",
+        dir.to_str().unwrap(),
+        "--target",
+        "wasm32-wasi",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let result = &report["build"]["results"][0];
+    assert_eq!(result["target"], "wasm32-wasi");
+    assert_eq!(result["adapter"], "cmake");
+    assert_eq!(result["status"], "success");
+    assert_eq!(result["level"], "executed");
+    assert_eq!(result["artifact"]["format"], "WebAssembly");
+    assert_eq!(result["artifact"]["architecture"], "wasm32");
+    assert_eq!(result["run"]["success"], true);
+    let artifact = result["artifact"]["path"].as_str().expect("artifact path");
+    assert!(
+        artifact.ends_with(".wasm"),
+        "unexpected artifact: {artifact}"
+    );
+    assert!(Path::new(artifact).is_file());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn release_builds_and_executes_cmake_cross_target_when_tools_are_available() {
     for tool in ["cmake", "zig", "qemu-x86_64"] {
         if which::which(tool).is_err() {
@@ -478,11 +622,99 @@ fn release_builds_and_executes_flint_cross_target_when_tools_are_available() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn release_builds_and_executes_flint_wasi_target_when_tools_are_available() {
+    if which::which("zig").is_err() || which::which("wasmtime").is_err() {
+        return;
+    }
+    let Some(flintc) = flintc_path() else {
+        return;
+    };
+    let runtime = flintc.parent().map(|root| root.join("runtime"));
+    if !runtime
+        .as_ref()
+        .map(|runtime| runtime.join("runtime.c").is_file())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let dir = temp_project("release-flint-wasi");
+    fs::write(
+        dir.join("main.fl"),
+        include_str!("fixtures/flint-hello/main.fl"),
+    )
+    .unwrap();
+
+    let mut command = Command::new(binary());
+    command.env("FLINTC", &flintc);
+    command.args([
+        "release",
+        "--path",
+        dir.to_str().unwrap(),
+        "--target",
+        "wasm32-wasi",
+        "--format",
+        "json",
+    ]);
+
+    let output = command.output().expect("run omnibuild");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let result = &report["build"]["results"][0];
+    assert_eq!(result["target"], "wasm32-wasi");
+    assert_eq!(result["adapter"], "flint");
+    assert_eq!(result["status"], "success");
+    assert_eq!(result["level"], "executed");
+    assert_eq!(result["artifact"]["format"], "WebAssembly");
+    assert_eq!(result["artifact"]["architecture"], "wasm32");
+    assert_eq!(result["run"]["success"], true);
+    let artifact = result["artifact"]["path"].as_str().expect("artifact path");
+    assert!(
+        artifact.ends_with(".wasm"),
+        "unexpected artifact: {artifact}"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn flintc_path() -> Option<PathBuf> {
     if let Some(value) = std::env::var_os("FLINTC").filter(|value| !value.is_empty()) {
         return Some(PathBuf::from(value));
     }
     which::which("flintc").ok()
+}
+
+fn rust_src_available() -> bool {
+    let Ok(output) = Command::new("rustc").args(["--print", "sysroot"]).output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let sysroot = String::from_utf8_lossy(&output.stdout);
+    Path::new(sysroot.trim())
+        .join("lib/rustlib/src/rust/library/std")
+        .is_dir()
+}
+
+fn rust_std_available(triple: &str) -> bool {
+    let Ok(output) = Command::new("rustc")
+        .args(["--print", "target-libdir", "--target", triple])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let path = String::from_utf8_lossy(&output.stdout);
+    Path::new(path.trim()).is_dir()
 }
 
 fn temp_project(tag: &str) -> PathBuf {

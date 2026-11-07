@@ -54,12 +54,28 @@ pub fn rust_sysroot() -> Option<String> {
 }
 
 pub fn rust_std_installed(triple: &str) -> bool {
+    let Some(sysroot) = rust_sysroot() else {
+        return false;
+    };
+    let lib = Path::new(&sysroot)
+        .join("lib/rustlib")
+        .join(triple)
+        .join("lib");
+    let Ok(entries) = std::fs::read_dir(lib) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        name.starts_with("libstd-") && name.ends_with(".rlib")
+    })
+}
+
+pub fn rust_src_installed() -> bool {
     rust_sysroot()
         .map(|sysroot| {
             Path::new(&sysroot)
-                .join("lib/rustlib")
-                .join(triple)
-                .join("lib")
+                .join("lib/rustlib/src/rust/library/std")
                 .is_dir()
         })
         .unwrap_or(false)

@@ -28,6 +28,7 @@ pub fn run() -> DoctorReport {
             Some("set FLINTC or add flintc to PATH"),
         ),
         ("qemu-x86_64", None, Some("pkg install qemu-user-x86-64")),
+        ("wasmtime", None, Some("pkg install wasmtime")),
         ("tar", None, Some("pkg install tar")),
         ("zip", None, Some("pkg install zip")),
         ("ld.lld", None, None),

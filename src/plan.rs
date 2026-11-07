@@ -153,6 +153,16 @@ fn build_system_priority(build_system: &str) -> usize {
     }
 }
 
+fn check_any_tool(names: &[&str], hint: &str) -> ToolCheck {
+    for name in names {
+        let tool = toolchain::check_tool(name, None, Some(hint));
+        if tool.available {
+            return tool;
+        }
+    }
+    toolchain::check_tool(names[0], None, Some(hint))
+}
+
 pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
     let host = target::host();
     let cross = host.map(|host| host.id != spec.id).unwrap_or(true);
@@ -177,20 +187,103 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                     (ReadinessStatus::Ready, None)
                 } else {
                     let std_installed = toolchain::rust_std_installed(spec.rust_triple);
+                    let rust_src = toolchain::rust_src_installed();
                     tools.push(ToolCheck {
                         tool: format!("rust-std:{}", spec.rust_triple),
                         available: std_installed,
                         path: None,
-                        hint: Some(format!("rustup target add {}", spec.rust_triple)),
+                        hint: Some(if rust_src {
+                            "missing target std; will build it from rust-src".to_string()
+                        } else {
+                            format!("rustup target add {}", spec.rust_triple)
+                        }),
                     });
-                    if std_installed {
-                        (ReadinessStatus::Ready, None)
+                    if !std_installed {
+                        tools.push(ToolCheck {
+                            tool: "rust-src".to_string(),
+                            available: rust_src,
+                            path: None,
+                            hint: Some(
+                                "pkg install rust-src or rustup component add rust-src".to_string(),
+                            ),
+                        });
+                    }
+                    let linker = if spec.os == "wasi" {
+                        None
                     } else {
+                        Some(toolchain::check_tool("zig", None, Some("pkg install zig")))
+                    };
+                    if let Some(linker) = &linker {
+                        tools.push(linker.clone());
+                    }
+                    let windows_binutils_ready = if spec.os == "windows" && !std_installed {
+                        let dlltool = check_any_tool(
+                            &["llvm-dlltool", "dlltool"],
+                            "install llvm-dlltool or mingw-w64 dlltool",
+                        );
+                        let ar = check_any_tool(
+                            &["llvm-ar", "ar"],
+                            "install llvm-ar or a target archiver",
+                        );
+                        let ready = dlltool.available && ar.available;
+                        tools.push(dlltool);
+                        tools.push(ar);
+                        ready
+                    } else {
+                        true
+                    };
+                    if !std_installed && !rust_src {
                         (
                             ReadinessStatus::Blocked,
                             Some(format!(
-                                "Rust std for `{}` is not installed",
+                                "Rust std for `{}` is missing and rust-src is not installed",
                                 spec.rust_triple
+                            )),
+                        )
+                    } else if linker.as_ref().is_some_and(|tool| !tool.available) {
+                        (
+                            ReadinessStatus::Blocked,
+                            Some(format!(
+                                "Rust cross-linking `{}` needs {}",
+                                spec.rust_triple,
+                                linker
+                                    .as_ref()
+                                    .map(|tool| tool.tool.as_str())
+                                    .unwrap_or("a linker")
+                            )),
+                        )
+                    } else if !windows_binutils_ready {
+                        (
+                            ReadinessStatus::Blocked,
+                            Some(
+                                "building Rust std for Windows needs llvm-dlltool and llvm-ar"
+                                    .to_string(),
+                            ),
+                        )
+                    } else if spec.os == "wasi" {
+                        let wasmtime =
+                            toolchain::check_tool("wasmtime", None, Some("pkg install wasmtime"));
+                        let available = wasmtime.available;
+                        tools.push(wasmtime);
+                        (
+                            ReadinessStatus::Ready,
+                            Some(if available {
+                                "builds WASI; executes with wasmtime".to_string()
+                            } else {
+                                "builds WASI; install wasmtime to execute".to_string()
+                            }),
+                        )
+                    } else if std_installed {
+                        (ReadinessStatus::Ready, None)
+                    } else {
+                        (
+                            ReadinessStatus::Ready,
+                            Some(format!(
+                                "builds Rust std from rust-src with {}",
+                                linker
+                                    .as_ref()
+                                    .map(|tool| tool.tool.as_str())
+                                    .unwrap_or("linker")
                             )),
                         )
                     }
@@ -223,11 +316,42 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                                 && root.join("runtime/flint_aegis.c").is_file()
                         })
                         .unwrap_or(false);
-                    if spec.os != "linux" {
+                    if spec.os == "wasi" {
+                        if !zig.available {
+                            (
+                                ReadinessStatus::Blocked,
+                                Some("Flint WASI needs zig; install zig".to_string()),
+                            )
+                        } else if !runtime_ready {
+                            (
+                                ReadinessStatus::Blocked,
+                                Some(
+                                    "Flint runtime sources were not found next to flintc; cannot build WASI"
+                                        .to_string(),
+                                ),
+                            )
+                        } else {
+                            let wasmtime = toolchain::check_tool(
+                                "wasmtime",
+                                None,
+                                Some("pkg install wasmtime"),
+                            );
+                            let available = wasmtime.available;
+                            tools.push(wasmtime);
+                            (
+                                ReadinessStatus::Ready,
+                                Some(if available {
+                                    "builds Flint WASI; executes with wasmtime".to_string()
+                                } else {
+                                    "builds Flint WASI; install wasmtime to execute".to_string()
+                                }),
+                            )
+                        }
+                    } else if spec.os != "linux" {
                         (
                             ReadinessStatus::Experimental,
                             Some(format!(
-                                "Flint cross-link is implemented for Linux targets; `{}` remains unimplemented",
+                                "Flint cross-link is implemented for Linux and WASI; `{}` remains unimplemented",
                                 spec.os
                             )),
                         )
@@ -295,6 +419,19 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                         )
                     } else if matches!(spec.os, "linux" | "windows") {
                         (ReadinessStatus::Ready, None)
+                    } else if spec.os == "wasi" {
+                        let wasmtime =
+                            toolchain::check_tool("wasmtime", None, Some("pkg install wasmtime"));
+                        let available = wasmtime.available;
+                        tools.push(wasmtime);
+                        (
+                            ReadinessStatus::Ready,
+                            Some(if available {
+                                "builds WASI; executes with wasmtime".to_string()
+                            } else {
+                                "builds WASI; install wasmtime to execute".to_string()
+                            }),
+                        )
                     } else {
                         (
                             ReadinessStatus::Experimental,
@@ -450,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_cargo_target_is_blocked_without_std() {
+    fn cross_cargo_target_reports_actionable_readiness() {
         let Some(host) = target::host() else {
             return;
         };
@@ -462,8 +599,21 @@ mod tests {
         let config = Config::default();
         let windows = target::by_id("windows-x86_64").unwrap();
         let plan = build_plan(&root, &config, &report, &[windows]).unwrap();
-        assert_eq!(plan.targets[0].readiness.status, ReadinessStatus::Blocked);
-        assert!(plan.targets[0].readiness.cross);
+        let readiness = &plan.targets[0].readiness;
+        assert!(readiness.cross);
+        match readiness.status {
+            ReadinessStatus::Ready => {}
+            ReadinessStatus::Blocked => {
+                let reason = readiness.reason.as_deref().unwrap_or_default();
+                assert!(
+                    ["rust-src", "Zig", "llvm-dlltool", "cargo"]
+                        .iter()
+                        .any(|needle| reason.contains(needle)),
+                    "blocked without an actionable reason: {reason}"
+                );
+            }
+            ref other => panic!("unexpected cross readiness: {other:?}"),
+        }
     }
 
     #[test]

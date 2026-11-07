@@ -136,7 +136,7 @@ pub const TARGETS: &[TargetSpec] = &[
         flint_triple: "wasm32-unknown-wasi",
         zig_triple: "wasm32-wasi",
         binary_format: "WebAssembly",
-        notes: "Emit-only until a WASI sysroot and runner are provisioned",
+        notes: "Cargo, CMake and Flint build WASI; wasmtime executes it",
     },
     TargetSpec {
         id: "linux-riscv64",

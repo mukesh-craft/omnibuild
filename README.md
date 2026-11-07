@@ -44,35 +44,40 @@ is a promise about an untested platform.
 | Project detection | Cargo, CMake and Flint projects, including monorepo scans. Marker-only detection also recognises Go, npm, Maven, Gradle, SwiftPM and dotnet projects. |
 | Build planning | Target readiness, native vs cross reporting, missing-tool hints, per-target triples, and a `--all` view. |
 | Native builds | Cargo, CMake and Flint on the host target. |
-| CMake cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Windows x86-64 and Linux riscv64 through Zig compiler/archiver wrappers and a generated CMake toolchain file. |
-| Flint cross-builds | Linux x86-64 and Linux aarch64 through `flintc` plus Zig-compiled Flint runtime sources. |
-| Artifact verification | ELF, PE/COFF, Mach-O and WebAssembly parsing; architecture and executable-kind checks; size and SHA-256. |
-| Runtime smoke test | Runs native artifacts directly and `linux-x86_64-musl` through `qemu-x86_64`. A non-running artifact is never reported as executed. |
-| Local cache | Content-addressed cache of successful final artifacts. Cache hits restore, re-hash, re-verify and, when execution is enabled, re-run the artifact with zero build commands. |
-| Packaging | Per-target `.tar.gz` and `.zip` archives with the artifact, target manifest, release manifest and `SHA256SUMS`; plus a package manifest and top-level checksums. |
+| Cargo cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Linux riscv64, Windows x86-64 and WASI (`wasm32-wasi`). Uses the installed target std or falls back to `-Z build-std` with `rust-src`; Zig handles linking. |
+| CMake cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Windows x86-64, Linux riscv64 and WASI (`wasm32-wasi`) through Zig compiler/archiver wrappers and a generated CMake toolchain file. |
+| Flint cross-builds | Linux x86-64 and Linux aarch64 through `flintc` plus Zig-compiled Flint runtime sources. Flint WASI uses LLVM IR plus a small POSIX shim and Zig's WASI libc. |
+| Artifact inspection | Verified for ELF, PE/COFF and WebAssembly: format, architecture, executable kind, size and SHA-256. Mach-O objects can be parsed, but macOS is not a supported target. |
+| Runtime smoke test | Runs native artifacts directly, `linux-x86_64-musl` through `qemu-x86_64`, and WASI artifacts through `wasmtime`. A non-running artifact is never reported as executed. |
+| Local cache | Implemented and tested: content-addressed cache of successful final artifacts. Cache hits restore, re-hash, re-verify and, when execution is enabled, re-run the artifact with zero build commands. |
+| Packaging | Implemented and tested: per-target `.tar.gz` and `.zip` archives with the artifact, target manifest, release manifest and `SHA256SUMS`; plus a package manifest and top-level checksums. |
 | Machine-readable output | Text, JSON and YAML output for every inspection and build command. |
 | Reproducibility records | Source path and Git state, toolchain versions, exact commands, logs, artifact hashes, cache keys and verification levels in manifests. |
 
 ### Verified target matrix
 
 These results were produced on Termux aarch64 with CMake 4.4.5, Zig 0.17.0,
-qemu-x86_64 11.1.3, Flint 0.0.23 and Rust 1.99.1. They are environment-specific,
-not universal support claims.
+qemu-x86_64 11.1.3, wasmtime 50.0.1, Rust 1.99.1 (including `rust-src` and the
+`wasm32-wasip1` std) and Flint 0.0.23. They are environment-specific, not universal
+support claims.
 
 | Target | Tier | Builders verified | Best verified result |
 |---|---|---|---|
 | `android-arm64` | 1 | Cargo, CMake, Flint | Executed natively |
-| `linux-x86_64-musl` | 1 | CMake, Flint | Executed through qemu |
-| `linux-x86_64` | 1 | CMake, Flint | Inspected; glibc binary does not execute under Termux qemu |
-| `linux-aarch64` | 1 | CMake, Flint | Inspected |
-| `windows-x86_64` | 2 | CMake | Inspected; no runtime on this device |
-| `linux-riscv64` | 3 | CMake | Inspected; experimental |
-| `wasm32-wasi` | 3 | None | Skipped; no adapter supports WASI yet |
+| `linux-x86_64-musl` | 1 | Cargo, CMake, Flint | Executed through qemu |
+| `linux-x86_64` | 1 | Cargo, CMake, Flint | Inspected; glibc binary does not execute under Termux qemu |
+| `linux-aarch64` | 1 | Cargo, CMake, Flint | Inspected |
+| `windows-x86_64` | 2 | Cargo, CMake | Inspected; no runtime on this device |
+| `linux-riscv64` | 3 | Cargo, CMake | Inspected; experimental |
+| `wasm32-wasi` | 3 | Cargo, CMake, Flint | Executed with wasmtime |
 | `macos-arm64` | Unsupported | None | Excluded from 0.1 |
 
-Cargo cross-compilation is blocked for every non-host target because target `std` is not
-provisioned. `--all` means every supported registry entry, including experimental ones;
-it does not mean every entry can execute.
+Cargo cross-compilation uses the installed target `std` when present; otherwise OmniBuild
+builds `std` from `rust-src` (`RUSTC_BOOTSTRAP=1`, `-Z build-std=std,panic_abort`).
+Cross-linking goes through Zig. Windows build-std additionally needs `llvm-dlltool` and
+`llvm-ar`. `--all` means every supported registry entry, including experimental ones; it
+does not mean every entry can execute. Flint WASI works for the verified fixture and
+runtime, with the limitations listed below.
 
 ## What OmniBuild is not
 
@@ -89,10 +94,14 @@ Being explicit here is more useful than a longer feature list.
   placeholders.
 - **Not production-ready.** The cache is local and artifact-only; compiler intermediate
   caching, shared caches and cross-platform CI are not implemented.
-- **Not a Rust cross-compiler.** Non-host Cargo targets fail with an actionable error;
-  OmniBuild never silently falls back to the host target.
-- **Not a source of platform claims.** Windows is inspect-only here, macOS is
-  unsupported, and WASM is currently skipped.
+- **Not every Rust target.** Cargo cross-builds cover the registry entries listed above,
+  not the whole Rust target universe. Standard-library builds can take several minutes the
+  first time. Windows is inspect-only here and macOS is unsupported.
+- **Not a complete Flint WASI runtime.** Flint WASI compiles and runs the verified
+  fixture. `flint_command`/`flint_command_output` return `ENOSYS`; signal, process-clock
+  and pthread behavior is emulated or limited.
+- **Not a source of platform claims.** Windows is inspect-only here and macOS is
+  unsupported. WASI is executed with wasmtime and reported as such.
 
 ## Quick start
 
@@ -133,6 +142,9 @@ omnibuild plan --path . --target android-arm64
 
 # Build, verify, and write manifests.
 omnibuild release --path . --target android-arm64
+
+# Build and execute a WASI artifact when the WASI tools are installed.
+omnibuild release --path . --target wasm32-wasi
 
 # Add release archives.
 omnibuild package --path . --target android-arm64
@@ -247,9 +259,13 @@ projects and targets you want to build.
 | Tool | Used for | Termux example |
 |---|---|---|
 | Rust/Cargo | Building OmniBuild and Cargo projects | `pkg install rust` |
+| Rust WASI std | Cargo `wasm32-wasip1` cross-builds | `pkg install rust-std-wasm32-wasip1` |
+| Rust source | Building missing target `std` from source | `pkg install rust-src` |
+| LLVM binutils | Windows build-std (`llvm-dlltool`, `llvm-ar`) | `pkg install llvm` |
 | CMake + Ninja | CMake projects | `pkg install cmake ninja` |
-| Zig | C/C++ cross-compilation and Flint cross-linking | `pkg install zig` |
+| Zig | C/C++ cross-compilation and all cross-linking | `pkg install zig` |
 | qemu-x86_64 | Executing `linux-x86_64-musl` artifacts | `pkg install qemu-user-x86-64` |
+| wasmtime | Executing WASI artifacts | `pkg install wasmtime` |
 | Flint | Flint projects | Build Flint and set `FLINTC=/path/to/flintc` |
 | tar + zip | Release archives | `pkg install tar zip` |
 
@@ -263,12 +279,24 @@ omnibuild plan --target <target>
 ## CI and verification
 
 GitHub Actions runs `cargo fmt --all -- --check`,
-`cargo clippy --all-targets -- -D warnings` and `cargo test` on Ubuntu. The current
-suite is 18 unit tests plus 11 CLI/end-to-end tests.
+`cargo clippy --all-targets -- -D warnings` and `cargo test` on Ubuntu. It provisions
+Rust `rust-src` and the `wasm32-wasip1` std, Zig, wasmtime, CMake, Ninja and
+`qemu-user`, so Cargo WASI, CMake WASI, CMake cross, Rust cross-build-std and musl
+execution tests run in CI. Tests that need Flint skip unless `FLINTC` or `flintc` is
+available.
 
-CI does **not** provision Zig, qemu or Flint, so the cross-build tests skip there. The
-cross-target evidence in this README comes from the Termux aarch64 device, not from CI.
-This is intentional: a green CI badge is not evidence that a cross target ran.
+### Evidence map
+
+| Claim | Where it lives | What proves it |
+|---|---|---|
+| Artifact SHA-256 and inspection | `src/verify.rs` | Release tests assert the artifact hash; CI runs them. |
+| Local cache entries | `src/cache.rs` | `release_reuses_a_cached_artifact_on_the_second_run`. |
+| `.tar.gz`/`.zip` release archives | `src/package.rs` | `package_writes_verified_tar_and_zip_archives`; archive hashes and `SHA256SUMS` are checked. |
+| Cargo WASI | `src/adapter.rs`, `src/build.rs` | `release_builds_and_executes_wasm_cargo_target_when_tools_are_available`. |
+| CMake WASI | `src/adapter.rs` | `release_builds_and_executes_wasm_cmake_target_when_tools_are_available`. |
+| Flint WASI | `src/adapter.rs` | `release_builds_and_executes_flint_wasi_target_when_tools_are_available`; also verified manually on Termux. |
+| Rust cross-builds | `src/adapter.rs`, `src/plan.rs` | `release_builds_and_executes_rust_cross_target_when_tools_are_available`; manual Termux runs for gnu/aarch64/riscv64 (inspected) and Windows (PE inspected). |
+| WASI execution | `src/build.rs` (`wasmtime`) | Wasm tests assert level `executed`. |
 
 ## FAQ
 
@@ -284,8 +312,16 @@ artifact. A real test-suite runner is future work.
 
 ### Can it cross-compile Rust?
 
-No. Cargo builds are limited to the host target. Rust cross targets fail with an
-actionable error instead of silently producing a host binary.
+Yes, for the registry targets. OmniBuild uses an installed target `std` or builds one
+from `rust-src`, links with Zig, and inspects the result. WASI runs through `wasmtime`;
+musl x86-64 runs through `qemu-x86_64`; Windows and glibc/other Linux targets are
+inspected only on this device.
+
+### Does it support WASM?
+
+Yes, for Cargo, CMake and Flint WASI targets when the required tools are installed.
+Flint WASI uses an LLVM IR shim; command execution and full POSIX thread support are not
+available.
 
 ### Why is a Windows build only "inspected"?
 
@@ -310,10 +346,10 @@ Deferred, not implemented:
 
 - Shared/remote cache and compiler intermediate caching.
 - Remote workers, scheduling, accounts, billing and a dashboard.
-- Cross Rust, Go, Java, .NET, JavaScript, Python and Swift adapters.
+- Go, Java, .NET, JavaScript, Python and Swift adapters.
 - Real test-suite execution and a `tested` verification level.
 - Windows runtime verification and macOS support.
-- WASI sysroot/runner provisioning.
+- Broader Flint WASI runtime coverage (commands, signals, threads).
 - Prebuilt release binaries and package-manager distribution.
 
 ## Contributing
