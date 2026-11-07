@@ -136,6 +136,21 @@ Download them from the
 and check `SHA256SUMS`. The Windows archive is built and inspected as PE/COFF here but
 has not been executed on Windows. There is no crates.io release yet.
 
+### Self-hosting
+
+The `v0.1.0` archives are self-hosted. OmniBuild built this project from a clean
+`git archive` checkout with `omnibuild release` for all three shipped targets:
+
+- `android-arm64` — native build on Termux;
+- `linux-x86_64-musl` — Cargo cross-build with `-Z build-std` and Zig linking; executed
+  under `qemu-x86_64`; and
+- `windows-x86_64` — Cargo cross-build with the Windows binutils wrappers; inspected as
+  PE/COFF only.
+
+This is a self-hosting check, not a bit-for-bit reproducibility guarantee. The Windows PE
+hash differs between the manual build and the self-hosted build, so Windows releases remain
+inspect-only until they can be exercised on a Windows host.
+
 ### Try it on a project
 
 ```bash
