@@ -9,7 +9,9 @@ and a machine that cannot natively run every target it builds for.
 
 > **Status: experimental 0.1.0.** OmniBuild is a working proof of concept, not
 > production build infrastructure. The verified target matrix is deliberately small,
-> the CLI may change, and there are no prebuilt releases yet.
+> and the CLI may change. Prebuilt Linux, Windows and Android archives are attached to
+> the [v0.1.0 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.0).
+> The Windows binary is built and PE-inspected here, not executed on Windows.
 
 ## Why this project exists
 
@@ -123,7 +125,16 @@ Optional:
 cargo install --path .
 ```
 
-There are no published binaries or crates.io releases yet.
+Prebuilt **v0.1.0** archives:
+
+- `omnibuild-0.1.0-linux-x86_64-musl.tar.gz`
+- `omnibuild-0.1.0-windows-x86_64.zip`
+- `omnibuild-0.1.0-aarch64-linux-android.tar.gz`
+
+Download them from the
+[v0.1.0 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.0)
+and check `SHA256SUMS`. The Windows archive is built and inspected as PE/COFF here but
+has not been executed on Windows. There is no crates.io release yet.
 
 ### Try it on a project
 
@@ -350,7 +361,7 @@ Deferred, not implemented:
 - Real test-suite execution and a `tested` verification level.
 - Windows runtime verification and macOS support.
 - Broader Flint WASI runtime coverage (commands, signals, threads).
-- Prebuilt release binaries and package-manager distribution.
+- Package-manager distribution.
 
 ## Contributing
 
@@ -368,5 +379,194 @@ not advertise a target as working if it was only compiled.
 
 ## License
 
-OmniBuild is dual-licensed under the MIT License or the Apache License, Version 2.0, at
-your option, matching `Cargo.toml`.
+OmniBuild is licensed under the **OmniBuild License 1.0**
+(`SPDX-License-Identifier: LicenseRef-OmniBuild-1.0`). The full text is in
+[`LICENSE`](LICENSE). The GNU General Public License version 2 text is in
+[`COPYING`](COPYING).
+
+This section explains what the license does and why it is written this way. It is a
+project explanation, not legal advice. The license text controls if this summary and the
+license ever differ.
+
+### What the default license allows
+
+The default path is the **OmniBuild License 1.0**, not GPLv2. It grants a broad,
+non-exclusive, royalty-free copyright license to reproduce, modify, and redistribute the
+Work and Derivative Works in source or object form. It also grants a patent license for
+patent claims that a Contributor controls and that the Contribution necessarily infringes.
+
+You may use OmniBuild commercially in products, internal systems, client work, and build
+pipelines. You may distribute it, including for a fee, if you follow the redistribution
+conditions. The main restriction is Commercial Hosting under Section 5: offering a
+substantial set of OmniBuild's features to third parties as a hosted or managed service
+requires a separate written commercial hosting license from the Licensor.
+
+The license removes two Apache-2.0-style documentation requirements:
+
+- no separate `NOTICE` file must be reproduced; and
+- no per-file "modified" markers or change descriptions are required.
+
+It does not remove copyright, attribution, or license-notice obligations. If you distribute
+the Work, you must include the license text and retain the applicable copyright, patent,
+trademark, and attribution notices in source distributions.
+
+### The four deliberate changes from Apache-2.0-style terms
+
+1. **GPLv2 alternative.** Section 7 grants a separate alternative license under GPLv2. It
+   is not an "additional permission" bolted onto GPLv2; GPLv2 has no general
+   additional-permissions mechanism. If you choose the alternative, GPLv2 governs your
+   copy and any Derivative Work you distribute under it.
+
+2. **Lower documentation burden.** Section 4 removes the separate `NOTICE` file and
+   per-file modification-notice requirements, while keeping the ordinary copyright,
+   attribution, and license-text requirements.
+
+3. **Commercial hosting.** Section 5 requires a separate written license for Commercial
+   Hosting. Section 5.3 keeps internal use, personal and non-commercial use, ordinary
+   distribution (including paid distribution), client professional services where the
+   client receives a copy, build-tool use, and source forks available without that
+   separate license.
+
+4. **Narrower patent termination.** Section 3.2 terminates only the patent license, and
+   only for a direct patent action about the Work or a Contribution. Unrelated patents,
+   unrelated products, indirect or contributory claims, and defensive counterclaims do not
+   trigger it. The copyright license does not terminate under Section 3.2.
+
+### GPLv2 compatibility and the unavoidable trade-off
+
+Apache 2.0 is compatible with GPLv3 but not with GPLv2 under the ASF's and FSF's published
+compatibility guidance. OmniBuild uses a **separate GPLv2 alternative** in Section 7, with
+the complete GPLv2 text in [`COPYING`](COPYING). A recipient who takes that route gets a
+GPLv2 copy; Sections 3.2, 4, and 5 do not apply to that copy, and GPLv2 controls.
+
+This has a direct consequence: **a GPLv2 copy can be used for Commercial Hosting without a
+separate commercial hosting license**, because GPLv2 does not permit that extra
+restriction. That is not an accident or a drafting gap; it is the price of GPLv2
+compatibility. If preventing that outcome matters more than GPLv2 compatibility, the GPLv2
+alternative must be removed. The default OmniBuild License path keeps the hosting
+condition.
+
+The alternative also does not relicense third-party dependencies. Some dependencies may be
+Apache-2.0-only or otherwise GPLv2-incompatible, in which case the GPLv2 route may not be
+available for a particular build. Check the dependency licenses before relying on it.
+
+### Commercial Hosting in practice
+
+Section 5.2 defines Commercial Hosting as making the Work or a Derivative Work available to
+third parties as a Hosted or Managed Service where the service exposes a substantial set of
+the Work's features and the operator receives a Commercial Advantage. Advertising,
+subscriptions, data monetization, and similar indirect benefits count as Commercial
+Advantage.
+
+Section 5.3 is intentionally narrow. It does not restrict:
+
+- internal use by you and your affiliates;
+- personal, educational, research, or other non-commercial use without third-party
+  Commercial Advantage;
+- distributing the software, including selling copies, if it is not primarily a hosted or
+  managed service;
+- professional services for a specific client where the client receives a copy and the
+  license;
+- using OmniBuild as a build, test, packaging, or automation tool where the primary value
+  is the software or artifacts produced, not access to OmniBuild itself; or
+- publishing the source, including a fork, if recipients comply with the license.
+
+Section 5.4 provides a 30-day cure after written notice and reinstates the licenses as of
+the cure date. It does not excuse the period of violation, and a repeat violation after
+reinstatement terminates the licenses permanently.
+
+### Patent termination in practice
+
+Section 3.2 is narrower than Apache 2.0's patent-termination clause. It applies only when
+you bring a direct patent action alleging that the Work, or a Contribution as incorporated
+in the Work, infringes a patent, and the accused instrumentality is the Work or
+Contribution rather than a separate product or service. It excludes indirect, contributory,
+and induced claims; unrelated products and unrelated patents; and defensive counterclaims.
+The remedy is termination of the patent license for the Work, not termination of the
+copyright license.
+
+This is a deliberate risk-reduction choice, not a guarantee that the clause will be
+enforced exactly as written in every jurisdiction.
+
+### Redistribution, contributions, and third-party material
+
+If you redistribute the Work or a Derivative Work, Section 4 requires you to include this
+license, retain applicable notices, avoid misrepresenting authorship, and avoid imposing
+extra restrictions on the Work. You may license your own original contributions under
+other terms only if those terms do not restrict rights in the Work.
+
+Section 6 says that intentionally submitting a contribution grants the copyright and
+patent licenses in Sections 2, 3, and 7 for that contribution. If you cannot grant those
+terms, state different terms in writing when you submit the contribution. The license does
+not assign your copyright.
+
+Third-Party Materials remain under their own licenses. The OmniBuild License does not
+relicense them, and you must comply with their terms.
+
+### Is this open source?
+
+No. The license is **source-available**, not OSI-approved open source. The Open Source
+Definition's criterion 6 forbids field-of-use restrictions, and Section 5 restricts a
+particular commercial use. The same reason prevents calling it "open source" in a way that
+implies OSI approval. It is also not on the SPDX License List, which is why it uses the
+custom `LicenseRef-OmniBuild-1.0` identifier.
+
+The license is related in spirit to other source-available licenses, but it is not legally
+identical to any of them:
+
+- **Functional Source License 1.1 (FSL-1.1-MIT)** restricts competing use for a period,
+  then converts to MIT. OmniBuild does not convert automatically.
+- **Elastic License 2.0** restricts managed-service use and has a different structure; it
+  does not provide a GPLv2 alternative.
+- **Commons Clause** adds a "not sell" restriction to an existing license. The public
+  Commons Clause/Neo4j dispute shows the legal and branding risk of mixing a commercial
+  restriction with open-source claims.
+
+OmniBuild's license is a custom text. If OSI approval matters, the Section 5 hosting
+restriction would have to be removed or narrowed to fit the Open Source Definition.
+
+### References
+
+- Apache License 2.0: <https://www.apache.org/licenses/LICENSE-2.0>
+- ASF licensing and GPL compatibility: <https://www.apache.org/legal/resolved.html>
+- GNU license-compatibility guidance: <https://www.gnu.org/licenses/license-list.html>
+- Open Source Definition, especially criterion 6: <https://opensource.org/osd>
+- Functional Source License: <https://fsl.software/>
+- Elastic License 2.0: <https://www.elastic.co/licensing/elastic-license>
+- Commons Clause: <https://commonsclause.com/>
+- SPDX custom license identifiers: <https://spdx.github.io/spdx-spec/v2.3/other-licensing-information-detected/>
+
+These references are background, not legal advice, and do not imply that those projects
+endorse this license.
+
+### Legal status and limits
+
+This is a custom license, not legal advice. Its enforceability can vary by jurisdiction,
+and commercial-hosting restrictions can interact with competition, consumer, contract, and
+copyright law. Patent termination and warranty/liability exclusions can also be limited by
+mandatory law. The license includes severability, a 30-day cure, and a narrow patent clause
+to reduce risk, but it cannot eliminate uncertainty. Have counsel review it before relying
+on it for a commercial hosting business or a high-value distribution.
+
+The license does not grant trademark rights beyond customary origin descriptions. It
+disclaims warranties and limits liability to the extent permitted by law. It does not
+restrict rights that applicable law makes mandatory.
+
+### Compliance checklist
+
+- Include [`LICENSE`](LICENSE) with every distribution of the Work.
+- Keep applicable copyright, patent, trademark, and attribution notices in source
+  distributions.
+- Do not impose extra restrictions on the Work beyond the license.
+- Get a separate written commercial hosting license before offering a covered hosted or
+  managed service.
+- If you use the GPLv2 alternative, follow GPLv2, include [`COPYING`](COPYING), and check
+  that your dependencies are GPLv2-compatible.
+- For contributions, either accept Section 6 or state different terms in writing.
+- Keep third-party notices and comply with third-party licenses.
+
+### Metadata
+
+`Cargo.toml` uses `license-file = "LICENSE"`. SPDX consumers can describe the choice as
+`LicenseRef-OmniBuild-1.0 OR GPL-2.0-only`. The repository stores the canonical license
+text so recipients can identify the terms without relying on a package registry.
