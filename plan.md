@@ -1156,7 +1156,7 @@ workstation. Every target claim below was checked on that device.
 | Host | Termux aarch64, Android/bionic, host triple `aarch64-unknown-linux-android24` |
 | Rust | `rustc` / `cargo` 1.99.1; std installed only for Android targets |
 | C toolchain | clang/clang++ 21.1.8, GNU ld 2.44, `ld.lld`, `lld`, `wasm-ld`, GNU make 4.4.1 |
-| Other tools | Python 3.14.8, Node 24.22.2, git 2.56.0 |
+| Other tools | Python 3.14.8, Node 24.22.2, git 2.56.0, tar, zip 3.0, zipinfo |
 | Cross tools | cmake 4.4.5, ninja 1.13.2, zig 0.17.0, qemu-x86_64 11.1.3 (installed for Sprint 2) |
 | Not installed | go, java, dotnet, swift, MinGW/wine |
 | Temp directory | `/tmp` does not exist; use `$TMPDIR` or Termux's `$PREFIX/tmp` |
@@ -1318,10 +1318,10 @@ Acceptance evidence:
   show `artifact/`, `manifest.json`, `release.json` and `SHA256SUMS` in both.
 - `cargo test`: 18 unit tests + 11 CLI/end-to-end tests passed.
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt` clean.
+- GitHub Actions CI on `main` passed: run `42332796838`, job `test`, all steps
+  successful. The CI log reported 18 unit tests and 11 CLI tests passing.
 
 Remaining from the original Sprint 3 scope:
-- CI is defined in `.github/workflows/ci.yml`; the first GitHub Actions run is
-  pending repository publication.
 - The cache stores final artifacts only; compiler intermediate caching is future work.
 
 ### Deferred
@@ -1387,7 +1387,7 @@ omnibuild/
   manifest note.
 - CMake cross targets are build/inspect except `linux-x86_64-musl`, which is
   executed under qemu.
-- CI is configured but has only been validated locally on Termux.
+- CI passes on GitHub Actions for `main` (run `42332796838`).
 
 ## G. Verification protocol
 
