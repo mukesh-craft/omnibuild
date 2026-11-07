@@ -992,7 +992,9 @@ fn write_windows_binutils(context: &BuildContext<'_>) -> Result<Option<String>> 
             .with_context(|| format!("cannot write Windows cross-tool {}", path.display()))?;
         make_executable(&path)?;
     }
-    Ok(Some(context.work_dir.display().to_string()))
+    let path = fs::canonicalize(context.work_dir)
+        .with_context(|| format!("cannot resolve {}", context.work_dir.display()))?;
+    Ok(Some(path.display().to_string()))
 }
 
 fn find_wasm_artifact(dir: &Path, preferred: &str) -> Result<PathBuf> {
