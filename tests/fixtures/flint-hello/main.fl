@@ -1,0 +1,4 @@
+fn main() -> i64 {
+    print("hello from flint-hello")
+    0
+}
