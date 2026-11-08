@@ -60,8 +60,8 @@ is a promise about an untested platform.
 
 These results were produced on Termux aarch64 with CMake 4.4.5, Zig 0.17.0,
 qemu-x86_64 11.1.3, wasmtime 50.0.1, Rust 1.99.1 (including `rust-src` and the
-`wasm32-wasip1` std) and Flint 0.0.23. They are environment-specific, not universal
-support claims.
+`wasm32-wasip1` std), Flint 0.0.23 and rcodesign 0.29.0. They are environment-specific,
+not universal support claims.
 
 | Target | Tier | Builders verified | Best verified result |
 |---|---|---|---|
@@ -169,7 +169,7 @@ available.
 ### Self-hosting
 
 The `v0.1.0` archives are self-hosted. OmniBuild built this project from a clean
-`git archive` checkout with `omnibuild release` for all three shipped targets:
+`git archive` checkout with `omnibuild release` for the three original shipped targets:
 
 - `android-arm64` — native build on Termux;
 - `linux-x86_64-musl` — Cargo cross-build with `-Z build-std` and Zig linking; executed

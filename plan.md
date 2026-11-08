@@ -1182,6 +1182,7 @@ workstation. Every target claim below was checked on that device.
 | C toolchain | clang/clang++ 21.1.8, GNU ld 2.44, `ld.lld`, `lld`, `wasm-ld`, GNU make 4.4.1 |
 | Other tools | Python 3.14.8, Node 24.22.2, git 2.56.0, tar, zip 3.0, zipinfo |
 | Cross tools | cmake 4.4.5, ninja 1.13.2, zig 0.17.0, qemu-x86_64 11.1.3 (installed for Sprint 2) |
+| macOS signing | rcodesign 0.29.0 (`cargo install apple-codesign --no-default-features`); ad-hoc signing verified on Mach-O ARM64 |
 | WASI tools | rust-std 1.99.1 for `wasm32-wasip1`; wasmtime 50.0.1 |
 | Not installed | go, java, dotnet, swift, MinGW/wine |
 | Temp directory | `/tmp` does not exist; use `$TMPDIR` or Termux's `$PREFIX/tmp` |
@@ -1463,7 +1464,10 @@ omnibuild/
   `linux-x86_64-musl` for executed Linux x86-64 verification.
 - Flint cross-link is implemented for Linux x86_64/aarch64 and WASI. Windows and
   riscv64 Flint targets are not implemented.
-- Windows artifacts can be inspected but not executed here.
+- Windows artifacts can be inspected but not executed here. PE hashes are profile- and
+  source-sensitive: the earlier manual PE predates `70765e8` and used
+  `CARGO_PROFILE_RELEASE_LTO=false`, while self-hosted builds use `lto = "thin"`.
+  Reproduce a hash only with the same source and profile.
 - macOS ARM64 artifacts are cross-built and ad-hoc signed here; execution is verified on
   macOS, not on this Termux device.
 - The cache is local and artifact-based; shared/remote caches, compiler
