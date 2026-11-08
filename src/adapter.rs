@@ -108,6 +108,10 @@ impl Adapter for CargoAdapter {
             .context("cannot construct PATH for Windows cross-tools")?;
             spec.env("PATH", joined.to_string_lossy().to_string());
         }
+        if context.target.os == "windows" {
+            let epoch = std::env::var("SOURCE_DATE_EPOCH").unwrap_or_else(|_| "0".to_string());
+            spec.env("SOURCE_DATE_EPOCH", epoch);
+        }
         if context.root.join("Cargo.lock").exists() {
             spec.arg("--locked");
         }
@@ -975,6 +979,8 @@ fn write_cross_linker(context: &BuildContext<'_>) -> Result<String> {
     fs::write(&link, body)
         .with_context(|| format!("cannot write linker wrapper {}", link.display()))?;
     make_executable(&link)?;
+    let link = fs::canonicalize(&link)
+        .with_context(|| format!("cannot resolve linker wrapper {}", link.display()))?;
     Ok(link.display().to_string())
 }
 

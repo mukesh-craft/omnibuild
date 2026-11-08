@@ -1390,6 +1390,8 @@ Delivered:
   `-C link-self-contained=no`.
 - Windows build-std helper wrappers for `llvm-dlltool`/`llvm-ar`, plus Zig filter
   rules for MinGW system libraries and `libunwind`.
+- Windows Cargo builds set `SOURCE_DATE_EPOCH=0` unless the caller provides it, so
+  PE wall-clock timestamps no longer make identical builds hash differently.
 - Readiness reports `rust-src`, Zig and Windows binutils requirements.
 - Flint WASI pipeline: emit LLVM IR, rename `main` to `flint_entry`, sanitize target
   features, compile a C entry plus POSIX shim, compile the Flint runtime with WASI
@@ -1460,6 +1462,9 @@ omnibuild/
 - Android/bionic is the only native runtime environment on this device.
 - Rust cross-compilation covers the registry targets through installed target std
   or `rust-src` build-std; Windows is inspected only, and first builds can be slow.
+- Windows PE hashes from before `SOURCE_DATE_EPOCH=0` support are not reproducible:
+  they also differ by source revision, LTO profile and embedded wall-clock timestamp.
+  Reproduce a Windows hash only with the same inputs and current OmniBuild.
 - Zig glibc dynamic binaries segfault under Termux qemu; use
   `linux-x86_64-musl` for executed Linux x86-64 verification.
 - Flint cross-link is implemented for Linux x86_64/aarch64 and WASI. Windows and

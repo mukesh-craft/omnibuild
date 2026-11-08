@@ -177,15 +177,16 @@ The `v0.1.0` archives are self-hosted. OmniBuild built this project from a clean
 - `windows-x86_64` — Cargo cross-build with the Windows binutils wrappers; inspected as
   PE/COFF only.
 
-This is a self-hosting check, not a bit-for-bit reproducibility guarantee. The Windows PE
-hash differs from the earlier manual build for two known reasons: the manual PE predates
-the `70765e8` path-canonicalization fix, and it forced
-`CARGO_PROFILE_RELEASE_LTO=false` while OmniBuild follows `Cargo.toml`'s `lto = "thin"`.
-Rebuilding the same `e3a09b4` source with LTO disabled produced `dedbc2d9…` at 3,055,104
-bytes; the thin-LTO self-host build produced `6a80dbc6…` at 2,274,816 bytes. The size
-change is the LTO setting; the exact manual hash also includes the older source. This is
-not evidence of build nondeterminism. Windows releases remain inspect-only until they can
-be exercised on a Windows host.
+This is a self-hosting check. The earlier manual Windows PE hash differs for three known
+reasons: it predates the `70765e8` path-canonicalization fix, it forced
+`CARGO_PROFILE_RELEASE_LTO=false` while OmniBuild follows `Cargo.toml`'s `lto = "thin"`,
+and PE headers embedded a wall-clock timestamp. LTO changes code size: rebuilding the same
+`e3a09b4` source with LTO disabled produced `dedbc2d9…` at 3,055,104 bytes, while the
+thin-LTO self-host build produced `6a80dbc6…` at 2,274,816 bytes. To make future Windows
+builds deterministic, the Cargo adapter now sets `SOURCE_DATE_EPOCH=0` for Windows unless
+the caller already set it; two consecutive verification builds then produced the same PE
+hash. The old manual hash is historical, not a reproducible target. Windows releases
+remain inspect-only until they can be exercised on a Windows host.
 
 ### Build for macOS from Termux
 
