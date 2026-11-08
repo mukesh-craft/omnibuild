@@ -955,10 +955,12 @@ fn write_cross_linker(context: &BuildContext<'_>) -> Result<String> {
         bail!("zig not found; install zig for Rust cross-linking");
     };
 
-    let filters = if context.target.os == "windows" {
-        "    -Wl,--fix-cortex-a53-843419|-nodefaultlibs|-Wl,-Bdynamic|-Wl,-Bstatic|-l:libpthread.a|-lmsvcrt|-lmingwex|-lmingw32|-lgcc) ;;\n    -lgcc_eh) set -- \"$@\" \"-lunwind\" ;;\n"
-    } else {
-        "    -Wl,--fix-cortex-a53-843419) ;;\n"
+    let filters = match context.target.os {
+        "windows" => {
+            "    -Wl,--fix-cortex-a53-843419|-nodefaultlibs|-Wl,-Bdynamic|-Wl,-Bstatic|-l:libpthread.a|-lmsvcrt|-lmingwex|-lmingw32|-lgcc) ;;\n    -lgcc_eh) set -- \"$@\" \"-lunwind\" ;;\n"
+        }
+        "macos" => "    -Wl,--fix-cortex-a53-843419|-liconv) ;;\n",
+        _ => "    -Wl,--fix-cortex-a53-843419) ;;\n",
     };
     let link = context.work_dir.join("cargo-linker.sh");
     let mut body = format!(
