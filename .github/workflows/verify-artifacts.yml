@@ -1,0 +1,67 @@
+name: Verify release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag containing the cross-built macOS and Windows archives
+        required: true
+        default: v0.1.0-verify
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Run macOS ARM64 artifact
+    runs-on: macos-latest
+    steps:
+      - name: Show runner
+        run: uname -m && sw_vers
+      - name: Download archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ inputs.release_tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "omnibuild-0.1.0-aarch64-apple-darwin.tar.gz" \
+            --dir dist
+      - name: Extract, verify and execute
+        run: |
+          tar -xzf dist/omnibuild-0.1.0-aarch64-apple-darwin.tar.gz -C dist
+          chmod +x dist/omnibuild
+          xattr -dr com.apple.quarantine dist/omnibuild || true
+          codesign --verify --verbose=2 dist/omnibuild
+          codesign -dv --verbose=4 dist/omnibuild 2>&1
+          dist/omnibuild --version
+          dist/omnibuild targets | head -20
+
+  windows:
+    name: Run Windows x86-64 artifact
+    runs-on: windows-latest
+    steps:
+      - name: Show runner
+        run: |
+          [System.Environment]::OSVersion.VersionString
+          $env:PROCESSOR_ARCHITECTURE
+      - name: Download archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          gh release download "${{ inputs.release_tag }}" `
+            --repo "${{ github.repository }}" `
+            --pattern "omnibuild-0.1.0-windows-x86_64.zip" `
+            --dir dist
+      - name: Extract and execute
+        shell: pwsh
+        run: |
+          Expand-Archive -Path dist/omnibuild-0.1.0-windows-x86_64.zip -DestinationPath dist/win -Force
+          Get-ChildItem dist/win
+          Get-FileHash dist/win/omnibuild.exe -Algorithm SHA256 | Format-List
+          & dist/win/omnibuild.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & dist/win/omnibuild.exe targets | Select-Object -First 20
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
