@@ -1,0 +1,84 @@
+name: Flint
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/adapter.rs"
+      - "src/plan.rs"
+      - "tests/cli.rs"
+      - "tests/fixtures/flint-hello/**"
+      - ".github/workflows/flint.yml"
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: mukesh-craft/flint
+          ref: f70dbac925e58edc85c2dda4e3beec5af61f0546
+          path: flint
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+      - uses: bytecodealliance/actions/wasmtime/setup@v1
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm python3 make qemu-user
+      - run: bash build.sh
+        working-directory: flint
+      - run: cargo test --test cli flint -- --nocapture
+        env:
+          FLINTC: ${{ github.workspace }}/flint/flintc
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: mukesh-craft/flint
+          ref: f70dbac925e58edc85c2dda4e3beec5af61f0546
+          path: flint
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+      - uses: bytecodealliance/actions/wasmtime/setup@v1
+      - run: brew install llvm python make && echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+      - run: bash build.sh
+        working-directory: flint
+      - run: cargo test --test cli flint -- --nocapture
+        env:
+          FLINTC: ${{ github.workspace }}/flint/flintc
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: mukesh-craft/flint
+          ref: f70dbac925e58edc85c2dda4e3beec5af61f0546
+          path: flint
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-clang mingw-w64-x86_64-llvm mingw-w64-x86_64-python mingw-w64-x86_64-make git
+      - name: Build Flint
+        shell: msys2 {0}
+        working-directory: flint
+        run: bash build.sh
+      - name: Test Flint adapter
+        shell: pwsh
+        env:
+          FLINTC: ${{ github.workspace }}\flint\flintc.exe
+        run: cargo test --test cli flint -- --nocapture

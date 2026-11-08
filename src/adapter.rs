@@ -524,9 +524,9 @@ fn build_flint_native(context: &BuildContext<'_>) -> Result<BuildResult> {
 }
 
 fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
-    if context.target.os != "linux" {
+    if !matches!(context.target.os, "linux" | "windows" | "macos") {
         bail!(
-            "Flint cross-link is implemented for Linux targets only (target {})",
+            "Flint cross-link is implemented for Linux, Windows and macOS targets; `{}` needs a native Flint runtime",
             context.target.id
         );
     }
@@ -559,38 +559,121 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         .with_context(|| format!("cannot create {}", context.work_dir.display()))?;
 
     let main = flint_main(context)?;
-    let object = context.work_dir.join("main.o");
-    let mut emit = CommandSpec::new(PathBuf::from(&flintc_path), context.root);
-    emit.arg(main.display().to_string());
-    emit.arg("--target");
-    emit.arg(context.target.flint_triple);
-    emit.arg("-o");
-    emit.arg(object.display().to_string());
-    emit.arg("--no-run");
-    emit.timeout(context.timeout);
+    let mut commands = Vec::new();
+    let mut main_objects = Vec::new();
 
-    let emit_log = context.work_dir.join("emit.log");
-    let emit_output = exec::run(&emit, &emit_log)?;
-    if !emit_output.success {
-        bail!(
-            "flintc cross-emit failed{}; see {}",
-            if emit_output.timed_out {
-                " (timed out)"
-            } else {
-                ""
-            },
-            emit_log.display()
-        );
+    if context.target.os == "linux" {
+        let object = context.work_dir.join("main.o");
+        let mut emit = CommandSpec::new(PathBuf::from(&flintc_path), context.root);
+        emit.arg(main.display().to_string());
+        emit.arg("--target");
+        emit.arg(context.target.flint_triple);
+        emit.arg("-o");
+        emit.arg(object.display().to_string());
+        emit.arg("--no-run");
+        emit.timeout(context.timeout);
+
+        let emit_log = context.work_dir.join("emit.log");
+        let emit_output = exec::run(&emit, &emit_log)?;
+        if !emit_output.success {
+            bail!(
+                "flintc cross-emit failed{}; see {}",
+                if emit_output.timed_out {
+                    " (timed out)"
+                } else {
+                    ""
+                },
+                emit_log.display()
+            );
+        }
+        if !object.is_file() {
+            bail!(
+                "flintc reported success but no object exists at {}",
+                object.display()
+            );
+        }
+        commands.push(emit_output);
+        main_objects.push(object);
+    } else {
+        let ir = context.work_dir.join("main.ll");
+        let mut emit = CommandSpec::new(PathBuf::from(&flintc_path), context.root);
+        emit.arg(main.display().to_string());
+        emit.arg("--target");
+        emit.arg(context.target.flint_triple);
+        emit.arg("--emit-llvm");
+        emit.arg("-o");
+        emit.arg(ir.display().to_string());
+        emit.arg("--no-run");
+        emit.timeout(context.timeout);
+
+        let emit_log = context.work_dir.join("emit.log");
+        let emit_output = exec::run(&emit, &emit_log)?;
+        if !emit_output.success {
+            bail!(
+                "flintc cross IR emission failed{}; see {}",
+                if emit_output.timed_out {
+                    " (timed out)"
+                } else {
+                    ""
+                },
+                emit_log.display()
+            );
+        }
+        commands.push(emit_output);
+
+        let ir_text = fs::read_to_string(&ir)
+            .with_context(|| format!("cannot read emitted IR {}", ir.display()))?;
+        let ir_text = sanitize_flint_cross_ir(&ir_text, context.target.os);
+        fs::write(&ir, ir_text).with_context(|| format!("cannot rewrite {}", ir.display()))?;
+
+        let object = context.work_dir.join("main.o");
+        let mut compile_main = CommandSpec::new(PathBuf::from(&zig_path), context.root);
+        compile_main.arg("cc");
+        compile_main.arg("-target");
+        compile_main.arg(context.target.zig_triple);
+        compile_main.arg("-O2");
+        compile_main.arg("-c");
+        compile_main.arg(ir.display().to_string());
+        compile_main.arg("-o");
+        compile_main.arg(object.display().to_string());
+        compile_main.timeout(context.timeout);
+        let log_path = context.work_dir.join("compile-main.log");
+        let output = exec::run(&compile_main, &log_path)?;
+        if !output.success {
+            bail!(
+                "zig cc failed compiling Flint IR; see {}",
+                log_path.display()
+            );
+        }
+        commands.push(output);
+        main_objects.push(object);
+
+        let entry_source = context.work_dir.join("flint_entry.c");
+        fs::write(&entry_source, FLINT_CROSS_ENTRY_C)?;
+        let entry_object = context.work_dir.join("flint_entry.o");
+        let mut compile_entry = CommandSpec::new(PathBuf::from(&zig_path), context.root);
+        compile_entry.arg("cc");
+        compile_entry.arg("-target");
+        compile_entry.arg(context.target.zig_triple);
+        compile_entry.arg("-O2");
+        compile_entry.arg("-c");
+        compile_entry.arg(entry_source.display().to_string());
+        compile_entry.arg("-o");
+        compile_entry.arg(entry_object.display().to_string());
+        compile_entry.timeout(context.timeout);
+        let log_path = context.work_dir.join("compile-entry.log");
+        let output = exec::run(&compile_entry, &log_path)?;
+        if !output.success {
+            bail!(
+                "zig cc failed compiling the Flint entry wrapper; see {}",
+                log_path.display()
+            );
+        }
+        commands.push(output);
+        main_objects.push(entry_object);
     }
-    if !object.is_file() {
-        bail!(
-            "flintc reported success but no object exists at {}",
-            object.display()
-        );
-    }
-    let mut commands = vec![emit_output];
+
     let mut runtime_objects = Vec::new();
-
     for source in ["runtime.c", "flint_aegis.c"] {
         let source_path = runtime_dir.join(source);
         let object_name = if source == "runtime.c" {
@@ -608,6 +691,8 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         compile.arg("-fno-pie");
         compile.arg("-include");
         compile.arg("stddef.h");
+        compile.arg("-include");
+        compile.arg("flint_aegis.h");
         compile.arg("-c");
         compile.arg("-I");
         compile.arg(runtime_dir.display().to_string());
@@ -628,7 +713,13 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         runtime_objects.push(object_path);
     }
 
-    let artifact = context.work_dir.join(&context.project.name);
+    let artifact = if context.target.os == "windows" {
+        context
+            .work_dir
+            .join(format!("{}.exe", context.project.name))
+    } else {
+        context.work_dir.join(&context.project.name)
+    };
     let mut link = CommandSpec::new(PathBuf::from(&zig_path), context.root);
     link.arg("cc");
     link.arg("-target");
@@ -637,7 +728,9 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         link.arg("-static");
     }
     link.arg("-no-pie");
-    link.arg(object.display().to_string());
+    for object in &main_objects {
+        link.arg(object.display().to_string());
+    }
     for runtime_object in &runtime_objects {
         link.arg(runtime_object.display().to_string());
     }
@@ -675,6 +768,15 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
     if let Some(version) = toolchain::version_of(&zig_path, &["version"]) {
         versions.insert("zig".to_string(), version);
     }
+    if context.target.os == "macos" {
+        commands.push(sign_macos_artifact(context, &artifact)?);
+        for signer in ["rcodesign", "codesign"] {
+            if let Some(version) = toolchain::version_of(signer, &["--version"]) {
+                versions.insert(signer.to_string(), version);
+                break;
+            }
+        }
+    }
 
     Ok(BuildResult {
         artifact,
@@ -682,6 +784,22 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         toolchain: versions,
     })
 }
+
+fn sanitize_flint_cross_ir(ir: &str, os: &str) -> String {
+    let ir = ir.replace("@main", "@flint_entry");
+    if os == "macos" {
+        ir.replace("section \".rodata\"", "section \"__TEXT,__const\"")
+    } else {
+        ir
+    }
+}
+
+const FLINT_CROSS_ENTRY_C: &str = r#"#include <stdint.h>
+extern int32_t flint_entry(int64_t argc, const void *argv);
+int main(int argc, char **argv) {
+    return flint_entry((int64_t)argc, (const void *)argv);
+}
+"#;
 
 fn build_flint_wasi(context: &BuildContext<'_>) -> Result<BuildResult> {
     let flintc = toolchain::check_tool(

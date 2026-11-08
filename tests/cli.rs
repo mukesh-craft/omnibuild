@@ -623,6 +623,137 @@ fn release_builds_and_executes_flint_cross_target_when_tools_are_available() {
 }
 
 #[test]
+fn release_builds_flint_windows_target_when_tools_are_available() {
+    if which::which("zig").is_err() {
+        return;
+    }
+    let Some(flintc) = flintc_path() else {
+        return;
+    };
+    let runtime = flintc.parent().map(|root| root.join("runtime"));
+    if !runtime
+        .as_ref()
+        .map(|runtime| runtime.join("runtime.c").is_file())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let dir = temp_project("release-flint-windows");
+    fs::write(
+        dir.join("main.fl"),
+        include_str!("fixtures/flint-hello/main.fl"),
+    )
+    .unwrap();
+
+    let mut command = Command::new(binary());
+    command.env("FLINTC", &flintc);
+    command.args([
+        "release",
+        "--path",
+        dir.to_str().unwrap(),
+        "--target",
+        "windows-x86_64",
+        "--format",
+        "json",
+    ]);
+
+    let output = command.output().expect("run omnibuild");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let result = &report["build"]["results"][0];
+    assert_eq!(result["target"], "windows-x86_64");
+    assert_eq!(result["adapter"], "flint");
+    assert_eq!(result["status"], "success");
+    assert_eq!(
+        result["level"],
+        if std::env::consts::OS == "windows" {
+            "executed"
+        } else {
+            "inspected"
+        }
+    );
+    assert_eq!(result["artifact"]["format"], "PE");
+    assert_eq!(result["artifact"]["architecture"], "x86_64");
+    let artifact = result["artifact"]["path"].as_str().expect("artifact path");
+    assert!(
+        artifact.ends_with(".exe"),
+        "unexpected artifact: {artifact}"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn release_builds_flint_macos_target_when_tools_are_available() {
+    if which::which("zig").is_err()
+        || (which::which("rcodesign").is_err() && which::which("codesign").is_err())
+    {
+        return;
+    }
+    let Some(flintc) = flintc_path() else {
+        return;
+    };
+    let runtime = flintc.parent().map(|root| root.join("runtime"));
+    if !runtime
+        .as_ref()
+        .map(|runtime| runtime.join("runtime.c").is_file())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let dir = temp_project("release-flint-macos");
+    fs::write(
+        dir.join("main.fl"),
+        include_str!("fixtures/flint-hello/main.fl"),
+    )
+    .unwrap();
+
+    let mut command = Command::new(binary());
+    command.env("FLINTC", &flintc);
+    command.args([
+        "release",
+        "--path",
+        dir.to_str().unwrap(),
+        "--target",
+        "macos-arm64",
+        "--format",
+        "json",
+    ]);
+
+    let output = command.output().expect("run omnibuild");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let result = &report["build"]["results"][0];
+    assert_eq!(result["target"], "macos-arm64");
+    assert_eq!(result["adapter"], "flint");
+    assert_eq!(result["status"], "success");
+    assert_eq!(
+        result["level"],
+        if std::env::consts::OS == "macos" && std::env::consts::ARCH == "aarch64" {
+            "executed"
+        } else {
+            "inspected"
+        }
+    );
+    assert_eq!(result["artifact"]["format"], "Mach-O");
+    assert_eq!(result["artifact"]["architecture"], "aarch64");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn release_builds_and_executes_flint_wasi_target_when_tools_are_available() {
     if which::which("zig").is_err() || which::which("wasmtime").is_err() {
         return;

@@ -13,6 +13,42 @@ and a machine that cannot natively run every target it builds for.
 > attached to the [v0.1.1 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.1).
 > The Windows and macOS archives have been executed on native CI runners.
 
+## Contents
+
+- [At a glance](#at-a-glance)
+- [Why this project exists](#why-this-project-exists)
+- [Where OmniBuild is used](#where-omnibuild-is-used)
+- [What it can really do](#what-it-can-really-do)
+- [What OmniBuild is not](#what-omnibuild-is-not)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [How a run works](#how-a-run-works)
+- [Architecture and internals](#architecture-and-internals)
+- [Output layout](#output-layout)
+- [Configuration](#configuration)
+- [Installation requirements](#installation-requirements)
+- [CI and verification](#ci-and-verification)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+- [Known limitations](#known-limitations)
+- [FAQ](#faq)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+## At a glance
+
+| Question | Answer |
+|---|---|
+| What is it? | A local-first command-line build orchestrator and artifact verifier. |
+| What problem does it solve? | It records whether a target was built, inspected, or actually executed, instead of treating "the compiler exited 0" as proof. |
+| Who is it for? | Developers working on Android/Termux, maintainers shipping native artifacts, release engineers, CI authors, and people learning how cross-compilation fits together. |
+| What does it build today? | Cargo, CMake and Flint projects, plus detection-only markers for several other ecosystems. |
+| Where does it run? | Any Rust host; the primary development and verification host is Termux on Android aarch64. No daemon, account, database, or hosted service is required. |
+| What does it produce? | Verified artifacts, per-target logs and manifests, release manifests, content-addressed cache entries, and `.tar.gz`/`.zip` release archives with checksums. |
+| How does it verify? | Binary format, architecture and executable kind; optional smoke execution; SHA-256 hashes; command records and toolchain versions. |
+| What is the status? | Experimental 0.1.1 proof of concept. The verified matrix is intentionally narrow and the CLI may change. |
+| How is it licensed? | Source-available under the OmniBuild License 1.0, with a separate GPLv2 alternative. See [License](#license). |
+
 ## Why this project exists
 
 Cross-building usually starts as a shell script. Then the script grows target branches,
@@ -36,6 +72,55 @@ between **built**, **inspected** and **executed**.
 
 This project exists because a build result should be evidence, not an assumption.
 
+## Where OmniBuild is used
+
+OmniBuild is most useful where the build host is not the target device, and where a
+successful compiler exit code is not enough evidence. Its current concrete uses are:
+
+- **Flint development and release work.** Flint is the first real project OmniBuild was
+  built around. OmniBuild cross-builds Flint projects for Linux, Windows, macOS and WASI,
+  links the Flint C runtime with Zig, and records which targets actually ran. The
+  `.github/workflows/flint.yml` workflow builds Flint from source and exercises the
+  adapter on Linux x86-64/ARM64, macOS arm64 and Windows x64.
+- **Termux/Android as a build workstation.** The primary development host is an Android
+  aarch64 phone or tablet. OmniBuild builds Android artifacts natively, cross-builds
+  Linux and desktop artifacts, and uses qemu or wasmtime only where execution is
+  trustworthy.
+- **Release gates for self-hosted binaries.** The project builds its own v0.1.1 archives
+  with `omnibuild release`, writes manifests and hashes, and executes the macOS and
+  Windows archives on native CI runners before publishing them.
+- **CI artifact audits.** On a normal CI runner, OmniBuild can produce a machine-readable
+  record of the exact commands, toolchain versions, artifact hashes, cache key and
+  verification level for every target.
+- **Cross-compilation education and debugging.** `plan` explains why a target is ready,
+  blocked or experimental before spending time on a build. `doctor` and the per-target
+  logs make missing tools and linker failures visible.
+- **Local-first packaging.** Developers can produce release archives and checksums
+  without uploading source code to a hosted build service.
+
+Typical users are maintainers who need reproducible native release artifacts, developers
+who work on Android/Termux, CI engineers who want explicit execution evidence, and people
+who want to understand the moving parts behind cross-compilation.
+
+OmniBuild is not intended to be a hosted build farm, a sandbox for untrusted code, a
+general-purpose package manager, or a replacement for Cargo, CMake, Flint, Zig or a
+project's own test suite. Those boundaries are deliberate.
+
+### Design principles
+
+1. **Evidence over claims.** A target is not "working" because a compile command returned
+   zero. It has to pass inspection, and it is only "executed" if it actually ran.
+2. **Orchestrate, do not replace.** Cargo, CMake, Flint, Zig, qemu and wasmtime remain
+   responsible for their own jobs.
+3. **Target-first planning.** The target registry is explicit. Readiness, triples, binary
+   formats and missing tools are reported before a build starts.
+4. **No hidden shell.** Commands are spawned directly with explicit arguments, working
+   directories, environment variables, timeouts and log files.
+5. **Local-first and inspectable.** The cache is local, manifests are plain JSON, and the
+   command history is preserved on disk.
+6. **Honest limits.** Unsupported, experimental and inspect-only targets are labelled as
+   such rather than silently promoted.
+
 ## What it can really do
 
 These are the capabilities implemented and exercised in this repository. Nothing below
@@ -48,7 +133,7 @@ is a promise about an untested platform.
 | Native builds | Cargo, CMake and Flint on the host target. |
 | Cargo cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Linux riscv64, Windows x86-64, macOS ARM64 and WASI (`wasm32-wasi`). Uses the installed target std or falls back to `-Z build-std` with `rust-src`; Zig handles linking and `rcodesign` ad-hoc signs Mach-O artifacts. |
 | CMake cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Windows x86-64, Linux riscv64 and WASI (`wasm32-wasi`) through Zig compiler/archiver wrappers and a generated CMake toolchain file. |
-| Flint cross-builds | Linux x86-64 and Linux aarch64 through `flintc` plus Zig-compiled Flint runtime sources. Flint WASI uses LLVM IR plus a small POSIX shim and Zig's WASI libc. |
+| Flint cross-builds | Linux x86-64/aarch64, Windows x86-64 and macOS ARM64 through `flintc` plus Zig-compiled Flint runtime sources. Windows/macOS use emitted LLVM IR with a small entry wrapper; macOS artifacts are ad-hoc signed. Flint WASI uses LLVM IR plus a small POSIX shim and Zig's WASI libc. |
 | Artifact inspection | Verified for ELF, PE/COFF, WebAssembly and Mach-O: format, architecture, executable kind, size and SHA-256. macOS artifacts are ad-hoc signed so they can run on a Mac. |
 | Runtime smoke test | Runs native artifacts directly, `linux-x86_64-musl` through `qemu-x86_64`, and WASI artifacts through `wasmtime`. A non-running artifact is never reported as executed. |
 | Local cache | Implemented and tested: content-addressed cache of successful final artifacts. Cache hits restore, re-hash, re-verify and, when execution is enabled, re-run the artifact with zero build commands. |
@@ -70,12 +155,15 @@ universal support claims.
 | `linux-x86_64-musl` | 1 | Cargo, CMake, Flint | Executed through qemu |
 | `linux-x86_64` | 1 | Cargo, CMake, Flint | Inspected; glibc binary does not execute under Termux qemu |
 | `linux-aarch64` | 1 | Cargo, CMake, Flint | Inspected |
-| `windows-x86_64` | 2 | Cargo, CMake | Executed on GitHub Actions Windows x64; inspect-only on Termux |
+| `windows-x86_64` | 2 | Cargo, CMake, Flint | Executed on GitHub Actions Windows x64; inspect-only on Termux |
 | `linux-riscv64` | 3 | Cargo, CMake | Inspected; experimental |
 | `wasm32-wasi` | 3 | Cargo, CMake, Flint | Executed with wasmtime |
-| `macos-arm64` | 2 | Cargo | Cross-built, ad-hoc signed and executed on GitHub Actions macOS arm64 |
+| `macos-arm64` | 2 | Cargo, Flint | Cross-built, ad-hoc signed and executed on GitHub Actions macOS arm64 |
 
-Cargo cross-compilation uses the installed target `std` when present; otherwise OmniBuild
+Flint cross-builds use `flintc` for the target object/IR and Zig for the C runtime and link.
+Windows emits LLVM IR and links a MinGW PE; macOS emits LLVM IR, links a Mach-O and
+ad-hoc signs it. Android Flint builds run natively on the Android host; RISC-V Flint
+remains experimental. Cargo cross-compilation uses the installed target `std` when present; otherwise OmniBuild
 builds `std` from `rust-src` (`RUSTC_BOOTSTRAP=1`, `-Z build-std=std,panic_abort`).
 Cross-linking goes through Zig. Windows build-std additionally needs `llvm-dlltool` and
 `llvm-ar`. macOS builds use Zig for linking and `rcodesign` (`cargo install
@@ -299,6 +387,100 @@ Verification levels are recorded as:
 
 Inspection is never reported as runtime success.
 
+## Architecture and internals
+
+OmniBuild is a single Rust binary with no runtime service, database or background daemon.
+The code is split into small modules around one evidence pipeline:
+
+```text
+CLI
+ └─ detect projects
+     └─ select the primary project and target set
+         └─ plan target readiness and tool requirements
+             └─ dispatch to Cargo, CMake or Flint adapter
+                 └─ inspect the produced artifact
+                     └─ optionally execute it on a trustworthy runner
+                         └─ write cache entry and target/release manifests
+                             └─ optionally package archives and checksums
+```
+
+### Module responsibilities
+
+| Module | Responsibility |
+|---|---|
+| `src/cli.rs` | Parses commands, output formats and target selections; prints text, JSON or YAML. |
+| `src/config.rs` | Loads and validates `omnibuild.yaml`, including defaults and forward-compatible fields. |
+| `src/detect.rs` | Finds project markers, scans monorepos, records evidence and ranks detected projects. |
+| `src/plan.rs` | Selects the primary project, checks target readiness, reports missing tools and explains cross vs native builds. |
+| `src/target.rs` | Defines the target registry: OS, architecture, ABI, tier, LLVM/Rust/Flint/Zig triples and expected binary format. |
+| `src/adapter.rs` | Implements the Cargo, CMake and Flint build strategies, including cross-link wrappers, Zig invocation and macOS signing. |
+| `src/build.rs` | Orchestrates the pipeline, handles cache hits, runs the smoke test, assigns verification levels and writes manifests. |
+| `src/exec.rs` | Spawns commands directly, captures stdout/stderr, enforces timeouts and records exit status and duration. |
+| `src/verify.rs` | Parses ELF, PE/COFF, Mach-O and WebAssembly; checks format, architecture, executable kind and SHA-256. |
+| `src/cache.rs` | Computes content-addressed cache keys, restores artifacts and stores cache entries. |
+| `src/package.rs` | Stages artifacts and manifests, writes `.tar.gz`/`.zip` archives and produces `SHA256SUMS`. |
+| `src/manifest.rs` | Defines source, target, release and command records written as JSON. |
+| `src/toolchain.rs` | Detects tools, resolves `FLINTC`-style overrides and records versions. |
+| `src/doctor.rs` | Reports host, sysroot, installed tools and platform notes. |
+
+### Adapter and target selection
+
+Detection can recognise more project types than OmniBuild can build. The build engine
+currently has three adapters: **Cargo**, **CMake** and **Flint**. For a monorepo, the
+primary project is the shallowest supported project, with Cargo preferred over CMake,
+then Flint. A build targets that primary project; it does not yet build every project in
+the tree.
+
+Native targets use the host toolchain directly. Cross targets use the registry's recorded
+triples. Cargo and CMake use Zig as the cross-linker; Windows build-std also needs
+`llvm-dlltool` and `llvm-ar`. Flint uses `flintc` for target objects or LLVM IR, Zig for
+the C runtime and link, and `rcodesign`/`codesign` for macOS signing.
+
+### Verification model
+
+Inspection opens the artifact with the Rust `object` crate. It does not trust the file
+extension or the adapter's claim. It checks:
+
+- the file exists and is not empty;
+- the binary format matches the target (`ELF`, `PE/COFF`, `Mach-O` or `WebAssembly`);
+- the architecture matches (`x86_64`, `aarch64`, `riscv64` or `wasm32`);
+- the object kind is executable or dynamic (or a WASM module);
+- the artifact SHA-256 is recorded.
+
+Execution is a separate step. It is never inferred from inspection. Native targets run
+directly; `linux-x86_64-musl` can run through `qemu-x86_64`; WASI runs through
+`wasmtime`. On a host that cannot run the target, OmniBuild stops at `inspected`.
+
+### Cache and reproducibility
+
+The cache key is derived from the source tree (excluding build outputs and the cache
+itself), selected target fields, build mode, relevant configuration, lockfiles, selected
+environment variables and detected toolchain versions. A cache hit restores the artifact,
+re-hashes and re-inspects it, and re-runs it when execution is enabled. The cache stores a
+single final artifact plus its metadata; compiler intermediate caching and shared/remote
+caches are not implemented.
+
+Release manifests record the source path and Git state, toolchain versions, exact
+commands with arguments and working directory, logs, artifact hashes, cache key and
+verification level. That is what makes a result auditable later.
+
+### Security and trust model
+
+Commands are spawned directly rather than through a shell, which avoids shell quoting and
+injection bugs in OmniBuild's own invocation path. It does **not** sandbox the build.
+Cargo `build.rs`, CMake scripts, Flint build steps and compilers execute arbitrary project
+code with the permissions of the user running OmniBuild. Environment variables are passed
+through, and there is no network or filesystem isolation. Do not run OmniBuild on
+untrusted repositories without an external sandbox or container.
+
+### Extending OmniBuild
+
+Adding a target starts in `src/target.rs` with the OS, architecture, ABI, tier, triples and
+expected binary format. Adding an adapter starts with the `Adapter` trait in
+`src/adapter.rs` and the readiness logic in `src/plan.rs`. Any new claim needs tests plus
+evidence from a real run: the target, exact command, whether it was inspected or executed,
+and skipped targets with reasons.
+
 ## Output layout
 
 With the default configuration:
@@ -387,8 +569,10 @@ GitHub Actions runs `cargo fmt --all -- --check`,
 `cargo clippy --all-targets -- -D warnings` and `cargo test` on Ubuntu. It provisions
 Rust `rust-src` and the `wasm32-wasip1` std, Zig, wasmtime, CMake, Ninja and
 `qemu-user`, so Cargo WASI, CMake WASI, CMake cross, Rust cross-build-std and musl
-execution tests run in CI. Tests that need Flint skip unless `FLINTC` or `flintc` is
-available.
+execution tests run in CI. The separate `.github/workflows/flint.yml` workflow builds
+Flint from source on Linux x86-64/ARM64, macOS arm64 and Windows x64, then runs the
+Flint adapter tests with `FLINTC` set. Tests that need Flint skip unless `FLINTC` or
+`flintc` is available.
 
 ### Evidence map
 
@@ -399,9 +583,55 @@ available.
 | `.tar.gz`/`.zip` release archives | `src/package.rs` | `package_writes_verified_tar_and_zip_archives`; archive hashes and `SHA256SUMS` are checked. |
 | Cargo WASI | `src/adapter.rs`, `src/build.rs` | `release_builds_and_executes_wasm_cargo_target_when_tools_are_available`. |
 | CMake WASI | `src/adapter.rs` | `release_builds_and_executes_wasm_cmake_target_when_tools_are_available`. |
+| Flint cross-builds | `src/adapter.rs` | `release_builds_and_executes_flint_cross_target_when_tools_are_available`, `release_builds_flint_windows_target_when_tools_are_available` and `release_builds_flint_macos_target_when_tools_are_available`; macOS/Windows execution runs on native CI when Flint is provisioned. |
 | Flint WASI | `src/adapter.rs` | `release_builds_and_executes_flint_wasi_target_when_tools_are_available`; also verified manually on Termux. |
 | Rust cross-builds | `src/adapter.rs`, `src/plan.rs` | `release_builds_and_executes_rust_cross_target_when_tools_are_available`; manual Termux runs for gnu/aarch64/riscv64 (inspected) and Windows (PE inspected). |
 | WASI execution | `src/build.rs` (`wasmtime`) | Wasm tests assert level `executed`. |
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/` | The Rust implementation (about 5,200 lines): CLI, detection, planning, adapters, execution, verification, cache, manifests, packaging and toolchain checks. |
+| `tests/cli.rs` | End-to-end CLI tests, including native builds, cross-builds, WASI, caching, packaging and Flint adapters. |
+| `tests/fixtures/` | Minimal Cargo, CMake and Flint projects used by the test suite. |
+| `scripts/run-macos.sh` | Removes quarantine, applies an ad-hoc signature if needed, and executes a macOS artifact. |
+| `.github/workflows/ci.yml` | Format, Clippy, tests, macOS build/run and Windows build/run. |
+| `.github/workflows/flint.yml` | Builds Flint from source and runs the Flint adapter tests on Linux, macOS and Windows. |
+| `.github/workflows/verify-artifacts.yml` | Downloads published archives, verifies hashes and executes the macOS/Windows binaries on native runners. |
+| `plan.md` | The longer product and engineering plan behind the implementation. |
+| `Cargo.toml`, `Cargo.lock` | Rust package metadata and locked dependency graph. |
+| `README.md`, `LICENSE`, `COPYING` | User documentation, the OmniBuild License 1.0 and the GPLv2 alternative text. |
+
+Generated `dist/`, `.omnibuild-cache/` and a project-local `omnibuild.yaml` are not
+committed.
+
+## Development
+
+Build and test locally:
+
+```bash
+cargo build
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+```
+
+To exercise the Flint adapter, point `FLINTC` at a built Flint compiler:
+
+```bash
+FLINTC=/path/to/flintc cargo test --all-targets
+```
+
+Tests that need an external tool skip when that tool is absent. The important ones are
+Zig for cross-linking, qemu for musl execution, wasmtime for WASI, CMake/Ninja for CMake
+projects and `rcodesign` or `codesign` for macOS signing. A skipped test is not evidence
+that the target works; it means the environment could not test it.
+
+The project is self-hosting: `omnibuild release` builds OmniBuild itself, and the v0.1.1
+archives were produced that way. A release should include a clean source checkout, the
+target matrix used, archive and artifact hashes, and native execution evidence for the
+platforms that can run outside the build host.
 
 ## FAQ
 
@@ -424,9 +654,10 @@ inspected only on this device.
 
 ### Does it support WASM?
 
-Yes, for Cargo, CMake and Flint WASI targets when the required tools are installed.
-Flint WASI uses an LLVM IR shim; command execution and full POSIX thread support are not
-available.
+Yes, for Cargo, CMake, Flint desktop cross-builds and Flint WASI targets when the required
+tools are installed. Flint Windows/macOS use emitted LLVM IR plus a Zig-built runtime;
+Flint WASI uses an LLVM IR shim, so command execution and full POSIX thread support are
+not available there.
 
 ### Why is a Windows build only "inspected"?
 
@@ -445,6 +676,26 @@ No. It is an experimental 0.1.1 proof of concept with a deliberately narrow veri
 matrix. Use it to make build evidence explicit, not as the only gate for a production
 release.
 
+## Known limitations
+
+These are current, intentional limits, not a wish list:
+
+| Area | Limitation |
+|---|---|
+| Build systems | Only Cargo, CMake and Flint have adapters. Go, npm, Maven, Gradle, SwiftPM and dotnet are detected but not built. |
+| Monorepos | One primary project per run; the whole repository is not built as a graph. |
+| Flint RISC-V | The emitted object uses a soft-float ABI that does not match Zig's RISC-V runtime/CRT, so Flint RISC-V cross-linking is not supported yet. |
+| Flint Android cross-builds | Need a native Android toolchain/NDK; Android Flint builds currently run on the Android host. |
+| Flint WASI | Verified for the fixture, but command execution returns `ENOSYS` and signal, process-clock and pthread behavior is limited. |
+| macOS distribution | Artifacts are ad-hoc signed, not Developer ID signed or notarized. |
+| Windows toolchain | MinGW/GNU only; MSVC-native builds are not implemented. |
+| Runtime evidence | Windows and macOS are executed on native CI runners, not on Termux; glibc `linux-x86_64` is inspect-only under Termux qemu. |
+| Testing | `verification.run_tests` is an artifact smoke test, not the project's test suite. |
+| Cache | Local and artifact-only; no compiler intermediate cache, shared cache or remote cache. |
+| Isolation | No sandbox. Build scripts run with the invoking user's permissions and network access. |
+| Distribution | No crates.io, Termux, apt, Homebrew, winget, scoop or choco packages yet. |
+| Stability | 0.1.1 is experimental; the CLI and manifest schema may change. |
+
 ## Roadmap
 
 Deferred, not implemented:
@@ -453,7 +704,8 @@ Deferred, not implemented:
 - Remote workers, scheduling, accounts, billing and a dashboard.
 - Go, Java, .NET, JavaScript, Python and Swift adapters.
 - Real test-suite execution and a `tested` verification level.
-- Windows runtime verification; macOS execution on a native Mac or macOS CI runner.
+- Full test-suite runs on native Windows and macOS runners, beyond the artifact smoke test.
+- Flint RISC-V ABI alignment and a native Android cross-build path with an NDK.
 - Broader Flint WASI runtime coverage (commands, signals, threads).
 - Package-manager distribution: Termux `pkg`, apt, PowerShell (`winget`/`scoop`/`choco`)
   and macOS Homebrew.

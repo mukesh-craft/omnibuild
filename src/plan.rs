@@ -371,15 +371,23 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                                 }),
                             )
                         }
-                    } else if spec.os != "linux" {
+                    } else if spec.os == "android" {
+                        (
+                            ReadinessStatus::Experimental,
+                            Some(
+                                "Flint Android cross-builds need a native Android toolchain; run OmniBuild on the Android device"
+                                    .to_string(),
+                            ),
+                        )
+                    } else if !matches!(spec.os, "linux" | "windows" | "macos") {
                         (
                             ReadinessStatus::Experimental,
                             Some(format!(
-                                "Flint cross-link is implemented for Linux and WASI; `{}` remains unimplemented",
+                                "Flint cross-link for `{}` is not implemented",
                                 spec.os
                             )),
                         )
-                    } else if !matches!(spec.arch, "x86_64" | "aarch64") {
+                    } else if spec.os == "linux" && !matches!(spec.arch, "x86_64" | "aarch64") {
                         (
                             ReadinessStatus::Experimental,
                             Some(format!(
@@ -401,13 +409,37 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                             ),
                         )
                     } else {
-                        (
-                            ReadinessStatus::Ready,
-                            Some(
-                                "cross-links the Flint object with a Zig-built C runtime"
-                                    .to_string(),
-                            ),
-                        )
+                        let macos_signer_ready = if spec.os == "macos" {
+                            let signer = check_any_tool(
+                                &["rcodesign", "codesign"],
+                                "install rcodesign: cargo install apple-codesign",
+                            );
+                            let ready = signer.available;
+                            tools.push(signer);
+                            ready
+                        } else {
+                            true
+                        };
+                        if !macos_signer_ready {
+                            (
+                                ReadinessStatus::Blocked,
+                                Some(
+                                    "macOS Flint artifacts need ad-hoc signing; install rcodesign with `cargo install apple-codesign`"
+                                        .to_string(),
+                                ),
+                            )
+                        } else {
+                            let reason = match spec.os {
+                                "windows" => {
+                                    "cross-links the Flint object with Zig's MinGW runtime; execute on Windows"
+                                }
+                                "macos" => {
+                                    "cross-links the Flint object with Zig's macOS runtime and ad-hoc signs it"
+                                }
+                                _ => "cross-links the Flint object with a Zig-built C runtime",
+                            };
+                            (ReadinessStatus::Ready, Some(reason.to_string()))
+                        }
                     }
                 }
             }
