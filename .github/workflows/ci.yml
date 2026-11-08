@@ -32,3 +32,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
       - run: ./scripts/run-macos.sh ./target/release/omnibuild --version
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - run: .\target\release\omnibuild.exe --version
+      - run: .\target\release\omnibuild.exe targets

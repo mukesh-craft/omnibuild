@@ -1,3 +1,4 @@
 /target
 /dist
 /.omnibuild-cache
+/omnibuild.yaml

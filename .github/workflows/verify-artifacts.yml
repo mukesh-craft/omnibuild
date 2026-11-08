@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Release tag containing the cross-built macOS and Windows archives
         required: true
-        default: v0.1.0-verify
+        default: v0.1.1
 
 permissions:
   contents: write
@@ -25,11 +25,11 @@ jobs:
           mkdir -p dist
           gh release download "${{ inputs.release_tag }}" \
             --repo "${{ github.repository }}" \
-            --pattern "omnibuild-0.1.0-aarch64-apple-darwin.tar.gz" \
+            --pattern "omnibuild-0.1.1-aarch64-apple-darwin.tar.gz" \
             --dir dist
       - name: Extract, verify and execute
         run: |
-          tar -xzf dist/omnibuild-0.1.0-aarch64-apple-darwin.tar.gz -C dist
+          tar -xzf dist/omnibuild-0.1.1-aarch64-apple-darwin.tar.gz -C dist
           chmod +x dist/omnibuild
           xattr -dr com.apple.quarantine dist/omnibuild || true
           codesign --verify --verbose=2 dist/omnibuild
@@ -53,12 +53,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           gh release download "${{ inputs.release_tag }}" `
             --repo "${{ github.repository }}" `
-            --pattern "omnibuild-0.1.0-windows-x86_64.zip" `
+            --pattern "omnibuild-0.1.1-windows-x86_64.zip" `
             --dir dist
       - name: Extract and execute
         shell: pwsh
         run: |
-          Expand-Archive -Path dist/omnibuild-0.1.0-windows-x86_64.zip -DestinationPath dist/win -Force
+          Expand-Archive -Path dist/omnibuild-0.1.1-windows-x86_64.zip -DestinationPath dist/win -Force
           Get-ChildItem dist/win
           Get-FileHash dist/win/omnibuild.exe -Algorithm SHA256 | Format-List
           & dist/win/omnibuild.exe --version

@@ -7,11 +7,11 @@ inspects the result, runs it when possible, and writes manifests, hashes, cache 
 and release archives. It is built for the awkward space between Cargo, CMake, Zig, qemu
 and a machine that cannot natively run every target it builds for.
 
-> **Status: experimental 0.1.0.** OmniBuild is a working proof of concept, not
+> **Status: experimental 0.1.1.** OmniBuild is a working proof of concept, not
 > production build infrastructure. The verified target matrix is deliberately small,
-> and the CLI may change. Prebuilt Linux, Windows and Android archives are attached to
-> the [v0.1.0 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.0).
-> The Windows binary is built and PE-inspected here, not executed on Windows.
+> and the CLI may change. Prebuilt Linux, Windows, Android and macOS archives are
+> attached to the [v0.1.1 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.1).
+> The Windows and macOS archives have been executed on native CI runners.
 
 ## Why this project exists
 
@@ -130,20 +130,19 @@ Optional:
 cargo install --path .
 ```
 
-Prebuilt **v0.1.0** archives:
+Prebuilt **v0.1.1** archives:
 
-- `omnibuild-0.1.0-linux-x86_64-musl.tar.gz`
-- `omnibuild-0.1.0-windows-x86_64.zip`
-- `omnibuild-0.1.0-aarch64-linux-android.tar.gz`
+- `omnibuild-0.1.1-linux-x86_64-musl.tar.gz`
+- `omnibuild-0.1.1-windows-x86_64.zip`
+- `omnibuild-0.1.1-aarch64-linux-android.tar.gz`
+- `omnibuild-0.1.1-aarch64-apple-darwin.tar.gz`
 
 Download them from the
-[v0.1.0 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.0)
+[v0.1.1 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.1)
 and check `SHA256SUMS`. The Windows archive has been executed on GitHub Actions
-`windows-latest`; Termux verification remains inspect-only. There is no crates.io release
+`windows-latest`; the macOS archive has been executed on `macos-26-arm64`. Termux
+verification remains inspect-only for Windows and macOS. There is no crates.io release
 yet.
-
-A macOS ARM64 archive has also been built, ad-hoc signed and executed on GitHub Actions
-`macos-26-arm64`, but it is not attached to the public `v0.1.0` release yet.
 
 ### Planned one-command installs
 
@@ -174,14 +173,16 @@ available.
 
 ### Self-hosting
 
-The `v0.1.0` archives are self-hosted. OmniBuild built this project from a clean
-`git archive` checkout with `omnibuild release` for the three original shipped targets:
+The `v0.1.1` archives are self-hosted. OmniBuild builds this project from a clean
+`git archive` checkout with `omnibuild release` for the shipped targets:
 
 - `android-arm64` — native build on Termux;
 - `linux-x86_64-musl` — Cargo cross-build with `-Z build-std` and Zig linking; executed
-  under `qemu-x86_64`; and
-- `windows-x86_64` — Cargo cross-build with the Windows binutils wrappers; inspected as
-  PE/COFF here and executed on GitHub Actions `windows-latest`.
+  under `qemu-x86_64`;
+- `windows-x86_64` — Cargo cross-build with the Windows binutils wrappers; executed on
+  GitHub Actions `windows-latest`; and
+- `macos-arm64` — Cargo cross-build through Zig, ad-hoc signed with `rcodesign`, and
+  executed on GitHub Actions `macos-26-arm64`.
 
 This is a self-hosting check. The earlier manual Windows PE hash differs for three known
 reasons: it predates the `70765e8` path-canonicalization fix, it forced
@@ -307,8 +308,8 @@ dist/<project>/
 └── packages/
     ├── manifest.json             # package manifest
     ├── SHA256SUMS
-    ├── <project>-<target>-0.1.0.tar.gz
-    └── <project>-<target>-0.1.0.zip
+    ├── <project>-<target>-0.1.1.tar.gz
+    └── <project>-<target>-0.1.1.zip
 ```
 
 The local cache lives in `.omnibuild-cache/` by default. Both `dist/` and
@@ -434,7 +435,7 @@ environment.
 
 ### Is it production-ready?
 
-No. It is an experimental 0.1.0 proof of concept with a deliberately narrow verified
+No. It is an experimental 0.1.1 proof of concept with a deliberately narrow verified
 matrix. Use it to make build evidence explicit, not as the only gate for a production
 release.
 
