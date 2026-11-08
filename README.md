@@ -196,18 +196,24 @@ hash. The old manual hash is historical, not a reproducible target. The shipped 
 archive was executed on GitHub Actions `windows-latest`; Termux verification remains
 inspect-only.
 
-The macOS ARM64 archive was built from `d382bc7`, ad-hoc signed with `rcodesign` 0.29.0,
-and executed on GitHub Actions `macos-26-arm64`. The workflow reported `omnibuild 0.1.0`
-and a valid ad-hoc signature (`CDHash=5fdfc6a90b38f3a6759de6918822eaeab6ad9837`). The
-Windows archive reported `omnibuild 0.1.0` and its executable SHA-256 was
-`6a80dbc6a975e136004394598ff9d977c9d2d454b7204cf3b6698a054320797a`.
+The `v0.1.1` archives were built from commit `8e6477a`, ad-hoc signed where needed, and
+executed locally or on native CI runners:
 
-Execution evidence: [Verify release artifacts run 42454515351](https://github.com/mukesh-craft/omnibuild/actions/runs/42454515351).
-The corresponding archive hashes are:
+- Android ARM64 and Linux x86-64 musl ran during the release build (`omnibuild 0.1.1`).
+- macOS ARM64 ran on GitHub Actions `macos-26-arm64`; `codesign --verify` passed and the
+  ad-hoc CDHash was `2ed02a05ccc02dfcf9f735d4378edc229b46a724`.
+- Windows x86-64 ran on GitHub Actions `windows-latest`; the executable SHA-256 was
+  `c0bf493563f556b85d8a3bf25ae178409b0eea8e3e91c15f61f362ff909130f5`.
 
-- macOS: `4c20a7ebcaab68a3f39325829e202dc82834c039eaae0ce7bb6e56c8803e6c6b` (binary),
-  `795f2906d08414830a38075b4f4dcecef452ad3207171a81e841613a167b6dfa` (archive).
-- Windows executable: `6a80dbc6a975e136004394598ff9d977c9d2d454b7204cf3b6698a054320797a`.
+Execution evidence: [Verify release artifacts run 42456863145](https://github.com/mukesh-craft/omnibuild/actions/runs/42456863145).
+Archive hashes:
+
+- macOS: `a12392676c97a9b648b77a27d30789b85d3155a3acf2b374903051928acf0b70` (archive),
+  `f2ee4a0cbc39fd2510eff046a034235aa32b6c046f7117a3498f4e083a1a41bb` (binary).
+- Windows: `fc20b2030e9d08ad3576de2138e6ee147fd875e59ff1cbed52d68cf4dfd2632b` (archive),
+  `c0bf493563f556b85d8a3bf25ae178409b0eea8e3e91c15f61f362ff909130f5` (executable).
+- Android: `38581c519d797e59f9328265fa6d64b4951018e318e5957599ce0561120d8bc5`.
+- Linux musl: `e1a01f81e82a331b6529a046383cb404e45774fccd65e2b46d85a15fe80195f6`.
 
 ### Build for macOS from Termux
 

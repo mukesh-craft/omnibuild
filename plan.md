@@ -1422,6 +1422,31 @@ Remaining:
 - Cross-target test coverage is manual for Rust; CI provisions the shared tools but
   does not build every Rust target. Release-artifact execution is a manual workflow.
 
+### Sprint 6 — v0.1.1 release (COMPLETE)
+
+Delivered:
+- Bumped the crate to `0.1.1`.
+- Added a native `windows-latest` CI job that builds and runs `omnibuild.exe`.
+- Rebuilt all four release archives from a clean `git archive` at `8e6477a` using
+  self-hosted OmniBuild 0.1.1.
+- Published `v0.1.1` with Linux musl, Windows x86-64, Android ARM64 and macOS ARM64
+  assets plus `SHA256SUMS`.
+- Updated the manual artifact workflow to download and run the `v0.1.1` macOS and
+  Windows archives on native runners.
+
+Acceptance evidence:
+- Android ARM64 and Linux x86-64 musl artifacts executed locally as `omnibuild 0.1.1`.
+- macOS ARM64 archive executed on GitHub Actions `macos-26-arm64`; `codesign --verify`
+  passed and CDHash was `2ed02a05ccc02dfcf9f735d4378edc229b46a724`.
+- Windows x86-64 archive executed on GitHub Actions `windows-latest`; executable SHA-256
+  was `c0bf493563f556b85d8a3bf25ae178409b0eea8e3e91c15f61f362ff909130f5`.
+- Evidence: https://github.com/mukesh-craft/omnibuild/actions/runs/42456863145
+- Archive SHA-256:
+  - macOS `a12392676c97a9b648b77a27d30789b85d3155a3acf2b374903051928acf0b70`
+  - Android `38581c519d797e59f9328265fa6d64b4951018e318e5957599ce0561120d8bc5`
+  - Linux musl `e1a01f81e82a331b6529a046383cb404e45774fccd65e2b46d85a15fe80195f6`
+  - Windows `fc20b2030e9d08ad3576de2138e6ee147fd875e59ff1cbed52d68cf4dfd2632b`
+
 ### Deferred
 
 - Dashboard, accounts, billing, hosted workers.
