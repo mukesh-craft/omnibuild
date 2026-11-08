@@ -43,7 +43,7 @@ and a machine that cannot natively run every target it builds for.
 | What problem does it solve? | It records whether a target was built, inspected, or actually executed, instead of treating "the compiler exited 0" as proof. |
 | Who is it for? | Developers working on Android/Termux, maintainers shipping native artifacts, release engineers, CI authors, and people learning how cross-compilation fits together. |
 | What does it build today? | Cargo, CMake and Flint projects, plus detection-only markers for several other ecosystems. |
-| Where does it run? | Any Rust host; the primary development and verification host is Termux on Android aarch64. No daemon, account, database, or hosted service is required. |
+| Where does it run? | Linux x86-64/aarch64, Android aarch64, macOS ARM64 and Windows x86-64. The primary development and verification host is Termux on Android aarch64. No daemon, account, database, or hosted service is required. |
 | What does it produce? | Verified artifacts, per-target logs and manifests, release manifests, content-addressed cache entries, and `.tar.gz`/`.zip` release archives with checksums. |
 | How does it verify? | Binary format, architecture and executable kind; optional smoke execution; SHA-256 hashes; command records and toolchain versions. |
 | What is the status? | Experimental 0.1.1 proof of concept. The verified matrix is intentionally narrow and the CLI may change. |
@@ -185,8 +185,10 @@ Being explicit here is more useful than a longer feature list.
   accounts, billing or dashboard. Some configuration fields for those ideas exist as
   placeholders.
 - **Not production-ready.** The cache is local and artifact-only; compiler intermediate
-  caching and shared caches are not implemented, and cross-platform CI is limited to
-  macOS and release-artifact execution.
+  caching and shared caches are not implemented. CI runs the full Rust test suite on
+  Ubuntu, builds and runs the release binary on macOS and Windows, and runs Flint adapter
+  tests on Linux, macOS and Windows; full test-suite coverage on Windows and macOS is
+  still missing.
 - **Not every Rust target.** Cargo cross-builds cover the registry entries listed above,
   not the whole Rust target universe. Standard-library builds can take several minutes the
   first time. Windows is inspect-only on Termux and executed on a Windows runner; macOS
