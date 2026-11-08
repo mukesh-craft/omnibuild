@@ -80,8 +80,8 @@ successful compiler exit code is not enough evidence. Its current concrete uses 
 - **Flint development and release work.** Flint is the first real project OmniBuild was
   built around. OmniBuild cross-builds Flint projects for Linux, Windows, macOS and WASI,
   links the Flint C runtime with Zig, and records which targets actually ran. The
-  `.github/workflows/flint.yml` workflow builds Flint from source and exercises the
-  adapter on Linux x86-64/ARM64, macOS arm64 and Windows x64.
+  adapter is covered by the local CLI tests and can run on native CI when a working
+  Flint compiler is provisioned.
 - **Termux/Android as a build workstation.** The primary development host is an Android
   aarch64 phone or tablet. OmniBuild builds Android artifacts natively, cross-builds
   Linux and desktop artifacts, and uses qemu or wasmtime only where execution is
@@ -155,10 +155,10 @@ universal support claims.
 | `linux-x86_64-musl` | 1 | Cargo, CMake, Flint | Executed through qemu |
 | `linux-x86_64` | 1 | Cargo, CMake, Flint | Inspected; glibc binary does not execute under Termux qemu |
 | `linux-aarch64` | 1 | Cargo, CMake, Flint | Inspected |
-| `windows-x86_64` | 2 | Cargo, CMake, Flint | Executed on GitHub Actions Windows x64; inspect-only on Termux |
+| `windows-x86_64` | 2 | Cargo, CMake, Flint | Cargo/CMake executed on GitHub Actions Windows x64; Flint cross-built, Windows Flint execution pending; inspect-only on Termux |
 | `linux-riscv64` | 3 | Cargo, CMake | Inspected; experimental |
 | `wasm32-wasi` | 3 | Cargo, CMake, Flint | Executed with wasmtime |
-| `macos-arm64` | 2 | Cargo, Flint | Cross-built, ad-hoc signed and executed on GitHub Actions macOS arm64 |
+| `macos-arm64` | 2 | Cargo, Flint | Cargo cross-built, ad-hoc signed and executed on GitHub Actions macOS arm64; Flint cross-built and signed, execution pending |
 
 Flint cross-builds use `flintc` for the target object/IR and Zig for the C runtime and link.
 Windows emits LLVM IR and links a MinGW PE; macOS emits LLVM IR, links a Mach-O and
@@ -571,10 +571,10 @@ GitHub Actions runs `cargo fmt --all -- --check`,
 `cargo clippy --all-targets -- -D warnings` and `cargo test` on Ubuntu. It provisions
 Rust `rust-src` and the `wasm32-wasip1` std, Zig, wasmtime, CMake, Ninja and
 `qemu-user`, so Cargo WASI, CMake WASI, CMake cross, Rust cross-build-std and musl
-execution tests run in CI. The separate `.github/workflows/flint.yml` workflow builds
-Flint from source on Linux x86-64/ARM64, macOS arm64 and Windows x64, then runs the
-Flint adapter tests with `FLINTC` set. Tests that need Flint skip unless `FLINTC` or
-`flintc` is available.
+execution tests run in CI. Tests that need Flint skip unless `FLINTC` or `flintc` is
+available; the repository does not currently provision Flint on CI because the pinned
+upstream Flint revision does not build cleanly on the hosted Linux, macOS and Windows
+images.
 
 ### Evidence map
 
@@ -585,7 +585,7 @@ Flint adapter tests with `FLINTC` set. Tests that need Flint skip unless `FLINTC
 | `.tar.gz`/`.zip` release archives | `src/package.rs` | `package_writes_verified_tar_and_zip_archives`; archive hashes and `SHA256SUMS` are checked. |
 | Cargo WASI | `src/adapter.rs`, `src/build.rs` | `release_builds_and_executes_wasm_cargo_target_when_tools_are_available`. |
 | CMake WASI | `src/adapter.rs` | `release_builds_and_executes_wasm_cmake_target_when_tools_are_available`. |
-| Flint cross-builds | `src/adapter.rs` | `release_builds_and_executes_flint_cross_target_when_tools_are_available`, `release_builds_flint_windows_target_when_tools_are_available` and `release_builds_flint_macos_target_when_tools_are_available`; macOS/Windows execution runs on native CI when Flint is provisioned. |
+| Flint cross-builds | `src/adapter.rs` | `release_builds_and_executes_flint_cross_target_when_tools_are_available`, `release_builds_flint_windows_target_when_tools_are_available` and `release_builds_flint_macos_target_when_tools_are_available`; Windows/macOS execution requires a working Flint compiler on those hosts. |
 | Flint WASI | `src/adapter.rs` | `release_builds_and_executes_flint_wasi_target_when_tools_are_available`; also verified manually on Termux. |
 | Rust cross-builds | `src/adapter.rs`, `src/plan.rs` | `release_builds_and_executes_rust_cross_target_when_tools_are_available`; manual Termux runs for gnu/aarch64/riscv64 (inspected) and Windows (PE inspected). |
 | WASI execution | `src/build.rs` (`wasmtime`) | Wasm tests assert level `executed`. |
@@ -599,7 +599,6 @@ Flint adapter tests with `FLINTC` set. Tests that need Flint skip unless `FLINTC
 | `tests/fixtures/` | Minimal Cargo, CMake and Flint projects used by the test suite. |
 | `scripts/run-macos.sh` | Removes quarantine, applies an ad-hoc signature if needed, and executes a macOS artifact. |
 | `.github/workflows/ci.yml` | Format, Clippy, tests, macOS build/run and Windows build/run. |
-| `.github/workflows/flint.yml` | Builds Flint from source and runs the Flint adapter tests on Linux, macOS and Windows. |
 | `.github/workflows/verify-artifacts.yml` | Downloads published archives, verifies hashes and executes the macOS/Windows binaries on native runners. |
 | `plan.md` | The longer product and engineering plan behind the implementation. |
 | `Cargo.toml`, `Cargo.lock` | Rust package metadata and locked dependency graph. |
@@ -689,9 +688,10 @@ These are current, intentional limits, not a wish list:
 | Flint RISC-V | The emitted object uses a soft-float ABI that does not match Zig's RISC-V runtime/CRT, so Flint RISC-V cross-linking is not supported yet. |
 | Flint Android cross-builds | Need a native Android toolchain/NDK; Android Flint builds currently run on the Android host. |
 | Flint WASI | Verified for the fixture, but command execution returns `ENOSYS` and signal, process-clock and pthread behavior is limited. |
+| Flint CI provision | The pinned upstream Flint revision does not build cleanly on hosted Linux, macOS and Windows images, so Flint adapter tests skip on this repository's CI unless `FLINTC` is supplied. |
 | macOS distribution | Artifacts are ad-hoc signed, not Developer ID signed or notarized. |
 | Windows toolchain | MinGW/GNU only; MSVC-native builds are not implemented. |
-| Runtime evidence | Windows and macOS are executed on native CI runners, not on Termux; glibc `linux-x86_64` is inspect-only under Termux qemu. |
+| Runtime evidence | OmniBuild Windows/macOS artifacts are executed on native CI runners, not on Termux. Flint Windows/macOS artifacts are cross-built but await a working Flint compiler on those hosts. glibc `linux-x86_64` is inspect-only under Termux qemu. |
 | Testing | `verification.run_tests` is an artifact smoke test, not the project's test suite. |
 | Cache | Local and artifact-only; no compiler intermediate cache, shared cache or remote cache. |
 | Isolation | No sandbox. Build scripts run with the invoking user's permissions and network access. |
@@ -708,6 +708,7 @@ Deferred, not implemented:
 - Real test-suite execution and a `tested` verification level.
 - Full test-suite runs on native Windows and macOS runners, beyond the artifact smoke test.
 - Flint RISC-V ABI alignment and a native Android cross-build path with an NDK.
+- A current Flint compiler build suitable for CI, so native Windows/macOS Flint execution can run automatically.
 - Broader Flint WASI runtime coverage (commands, signals, threads).
 - Package-manager distribution: Termux `pkg`, apt, PowerShell (`winget`/`scoop`/`choco`)
   and macOS Homebrew.
