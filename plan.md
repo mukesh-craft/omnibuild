@@ -1401,6 +1401,14 @@ Acceptance evidence:
 - Rust `linux-x86_64-musl` → `success`/`executed` through qemu.
 - Rust `linux-x86_64`, `linux-aarch64` and `linux-riscv64` → `success`/`inspected`.
 - Rust `windows-x86_64` → `success`/`inspected`, PE/x86_64.
+- macOS ARM64 release archive → executed on GitHub Actions `macos-26-arm64`;
+  `codesign --verify` passed, `omnibuild 0.1.0` ran, and the target list included
+  `macos-arm64` as Tier 2.
+- Windows x86-64 release archive → executed on GitHub Actions `windows-latest`;
+  `omnibuild 0.1.0` ran, executable SHA-256
+  `6a80dbc6a975e136004394598ff9d977c9d2d454b7204cf3b6698a054320797a`.
+- Added `.github/workflows/verify-artifacts.yml` to download a release tag and run the
+  macOS and Windows archives on their native runners.
 - Flint `wasm32-wasi` → `success`/`executed`, WebAssembly/wasm32, output
   `hello from flint-hello`.
 - Added CLI coverage for Flint WASI and Rust musl build-std cross (qemu executed);
@@ -1408,10 +1416,11 @@ Acceptance evidence:
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` clean.
 
 Remaining:
-- Windows artifacts cannot be run on this device.
+- Windows artifacts cannot be run on this Termux device; the release archive now runs on
+  a Windows CI runner.
 - Flint WASI command execution and full thread/signal semantics remain limited.
 - Cross-target test coverage is manual for Rust; CI provisions the shared tools but
-  does not build every Rust target.
+  does not build every Rust target. Release-artifact execution is a manual workflow.
 
 ### Deferred
 
@@ -1452,6 +1461,7 @@ omnibuild/
 │       ├── flint-hello/
 │       └── rust-hello/
 ├── .github/workflows/ci.yml
+├── .github/workflows/verify-artifacts.yml  # run release archives on macOS/Windows
 ├── scripts/run-macos.sh     # quarantine removal, ad-hoc signing and execution
 ├── .gitignore
 └── target/                 # build output, not committed
@@ -1461,7 +1471,8 @@ omnibuild/
 
 - Android/bionic is the only native runtime environment on this device.
 - Rust cross-compilation covers the registry targets through installed target std
-  or `rust-src` build-std; Windows is inspected only, and first builds can be slow.
+  or `rust-src` build-std; Windows is inspect-only on Termux but the release archive is
+  executed on a Windows CI runner, and first builds can be slow.
 - Windows PE hashes from before `SOURCE_DATE_EPOCH=0` support are not reproducible:
   they also differ by source revision, LTO profile and embedded wall-clock timestamp.
   Reproduce a Windows hash only with the same inputs and current OmniBuild.

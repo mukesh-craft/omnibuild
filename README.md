@@ -60,8 +60,9 @@ is a promise about an untested platform.
 
 These results were produced on Termux aarch64 with CMake 4.4.5, Zig 0.17.0,
 qemu-x86_64 11.1.3, wasmtime 50.0.1, Rust 1.99.1 (including `rust-src` and the
-`wasm32-wasip1` std), Flint 0.0.23 and rcodesign 0.29.0. They are environment-specific,
-not universal support claims.
+`wasm32-wasip1` std), Flint 0.0.23 and rcodesign 0.29.0. macOS and Windows archive
+execution was additionally checked on GitHub Actions. They are environment-specific, not
+universal support claims.
 
 | Target | Tier | Builders verified | Best verified result |
 |---|---|---|---|
@@ -69,10 +70,10 @@ not universal support claims.
 | `linux-x86_64-musl` | 1 | Cargo, CMake, Flint | Executed through qemu |
 | `linux-x86_64` | 1 | Cargo, CMake, Flint | Inspected; glibc binary does not execute under Termux qemu |
 | `linux-aarch64` | 1 | Cargo, CMake, Flint | Inspected |
-| `windows-x86_64` | 2 | Cargo, CMake | Inspected; no runtime on this device |
+| `windows-x86_64` | 2 | Cargo, CMake | Executed on GitHub Actions Windows x64; inspect-only on Termux |
 | `linux-riscv64` | 3 | Cargo, CMake | Inspected; experimental |
 | `wasm32-wasi` | 3 | Cargo, CMake, Flint | Executed with wasmtime |
-| `macos-arm64` | 2 | Cargo | Built, ad-hoc signed and Mach-O inspected; run it on macOS |
+| `macos-arm64` | 2 | Cargo | Cross-built, ad-hoc signed and executed on GitHub Actions macOS arm64 |
 
 Cargo cross-compilation uses the installed target `std` when present; otherwise OmniBuild
 builds `std` from `rust-src` (`RUSTC_BOOTSTRAP=1`, `-Z build-std=std,panic_abort`).
@@ -96,17 +97,18 @@ Being explicit here is more useful than a longer feature list.
   accounts, billing or dashboard. Some configuration fields for those ideas exist as
   placeholders.
 - **Not production-ready.** The cache is local and artifact-only; compiler intermediate
-  caching, shared caches and cross-platform CI are not implemented.
+  caching and shared caches are not implemented, and cross-platform CI is limited to
+  macOS and release-artifact execution.
 - **Not every Rust target.** Cargo cross-builds cover the registry entries listed above,
   not the whole Rust target universe. Standard-library builds can take several minutes the
-  first time. Windows is inspect-only here; macOS builds are ad-hoc signed and must be
-  run on macOS.
+  first time. Windows is inspect-only on Termux and executed on a Windows runner; macOS
+  builds are ad-hoc signed and executed on a macOS runner.
 - **Not a complete Flint WASI runtime.** Flint WASI compiles and runs the verified
   fixture. `flint_command`/`flint_command_output` return `ENOSYS`; signal, process-clock
   and pthread behavior is emulated or limited.
-- **Not a source of platform claims.** Windows is inspect-only here. macOS artifacts are
-  built and ad-hoc signed here but must be run on macOS. WASI is executed with wasmtime
-  and reported as such.
+- **Not a source of platform claims.** Windows is inspect-only on Termux and executed on
+  a Windows runner. macOS artifacts are built and ad-hoc signed here and executed on a
+  macOS runner. WASI is executed with wasmtime and reported as such.
 
 ## Quick start
 
@@ -136,8 +138,12 @@ Prebuilt **v0.1.0** archives:
 
 Download them from the
 [v0.1.0 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.0)
-and check `SHA256SUMS`. The Windows archive is built and inspected as PE/COFF here but
-has not been executed on Windows. There is no crates.io release yet.
+and check `SHA256SUMS`. The Windows archive has been executed on GitHub Actions
+`windows-latest`; Termux verification remains inspect-only. There is no crates.io release
+yet.
+
+A macOS ARM64 archive has also been built, ad-hoc signed and executed on GitHub Actions
+`macos-26-arm64`, but it is not attached to the public `v0.1.0` release yet.
 
 ### Planned one-command installs
 
@@ -175,7 +181,7 @@ The `v0.1.0` archives are self-hosted. OmniBuild built this project from a clean
 - `linux-x86_64-musl` — Cargo cross-build with `-Z build-std` and Zig linking; executed
   under `qemu-x86_64`; and
 - `windows-x86_64` — Cargo cross-build with the Windows binutils wrappers; inspected as
-  PE/COFF only.
+  PE/COFF here and executed on GitHub Actions `windows-latest`.
 
 This is a self-hosting check. The earlier manual Windows PE hash differs for three known
 reasons: it predates the `70765e8` path-canonicalization fix, it forced
@@ -185,8 +191,22 @@ and PE headers embedded a wall-clock timestamp. LTO changes code size: rebuildin
 thin-LTO self-host build produced `6a80dbc6…` at 2,274,816 bytes. To make future Windows
 builds deterministic, the Cargo adapter now sets `SOURCE_DATE_EPOCH=0` for Windows unless
 the caller already set it; two consecutive verification builds then produced the same PE
-hash. The old manual hash is historical, not a reproducible target. Windows releases
-remain inspect-only until they can be exercised on a Windows host.
+hash. The old manual hash is historical, not a reproducible target. The shipped Windows
+archive was executed on GitHub Actions `windows-latest`; Termux verification remains
+inspect-only.
+
+The macOS ARM64 archive was built from `d382bc7`, ad-hoc signed with `rcodesign` 0.29.0,
+and executed on GitHub Actions `macos-26-arm64`. The workflow reported `omnibuild 0.1.0`
+and a valid ad-hoc signature (`CDHash=5fdfc6a90b38f3a6759de6918822eaeab6ad9837`). The
+Windows archive reported `omnibuild 0.1.0` and its executable SHA-256 was
+`6a80dbc6a975e136004394598ff9d977c9d2d454b7204cf3b6698a054320797a`.
+
+Execution evidence: [Verify release artifacts run 42454515351](https://github.com/mukesh-craft/omnibuild/actions/runs/42454515351).
+The corresponding archive hashes are:
+
+- macOS: `4c20a7ebcaab68a3f39325829e202dc82834c039eaae0ce7bb6e56c8803e6c6b` (binary),
+  `795f2906d08414830a38075b4f4dcecef452ad3207171a81e841613a167b6dfa` (archive).
+- Windows executable: `6a80dbc6a975e136004394598ff9d977c9d2d454b7204cf3b6698a054320797a`.
 
 ### Build for macOS from Termux
 
@@ -200,7 +220,8 @@ omnibuild release --path . --target macos-arm64
 
 Run `scripts/run-macos.sh` on the Mac. It removes the quarantine attribute, applies an
 ad-hoc signature if needed, and executes the artifact. The macOS CI job runs the same
-script against a native build.
+script against a native build. The cross-built macOS archive was also verified and
+executed on GitHub Actions `macos-26-arm64` with `codesign --verify` passing.
 
 ### Try it on a project
 
