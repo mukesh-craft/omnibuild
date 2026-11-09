@@ -5,6 +5,7 @@ use crate::{
     toolchain,
 };
 use anyhow::{Context, Result, anyhow, bail};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
@@ -19,6 +20,7 @@ pub struct BuildContext<'a> {
     pub target: &'static TargetSpec,
     pub mode: &'a str,
     pub work_dir: &'a Path,
+    pub cache_root: Option<&'a Path>,
     pub timeout: Duration,
 }
 
@@ -557,13 +559,28 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
 
     fs::create_dir_all(context.work_dir)
         .with_context(|| format!("cannot create {}", context.work_dir.display()))?;
+    let scratch = context.work_dir.join("flint");
+    reset_dir(&scratch)?;
+
+    let artifact = if context.target.os == "windows" {
+        context
+            .work_dir
+            .join(format!("{}.exe", context.project.name))
+    } else {
+        context.work_dir.join(&context.project.name)
+    };
+    if artifact.exists() {
+        fs::remove_file(&artifact)
+            .with_context(|| format!("cannot clear stale artifact {}", artifact.display()))?;
+    }
 
     let main = flint_main(context)?;
     let mut commands = Vec::new();
     let mut main_objects = Vec::new();
+    let use_ir = context.target.os != "linux" || context.target.arch == "riscv64";
 
-    if context.target.os == "linux" {
-        let object = context.work_dir.join("main.o");
+    if !use_ir {
+        let object = scratch.join("main.o");
         let mut emit = CommandSpec::new(PathBuf::from(&flintc_path), context.root);
         emit.arg(main.display().to_string());
         emit.arg("--target");
@@ -572,6 +589,7 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         emit.arg(object.display().to_string());
         emit.arg("--no-run");
         emit.timeout(context.timeout);
+        isolate_flint_tool(&mut emit, &scratch, context.cache_root);
 
         let emit_log = context.work_dir.join("emit.log");
         let emit_output = exec::run(&emit, &emit_log)?;
@@ -595,7 +613,7 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         commands.push(emit_output);
         main_objects.push(object);
     } else {
-        let ir = context.work_dir.join("main.ll");
+        let ir = scratch.join("main.ll");
         let mut emit = CommandSpec::new(PathBuf::from(&flintc_path), context.root);
         emit.arg(main.display().to_string());
         emit.arg("--target");
@@ -605,6 +623,7 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         emit.arg(ir.display().to_string());
         emit.arg("--no-run");
         emit.timeout(context.timeout);
+        isolate_flint_tool(&mut emit, &scratch, context.cache_root);
 
         let emit_log = context.work_dir.join("emit.log");
         let emit_output = exec::run(&emit, &emit_log)?;
@@ -623,20 +642,22 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
 
         let ir_text = fs::read_to_string(&ir)
             .with_context(|| format!("cannot read emitted IR {}", ir.display()))?;
-        let ir_text = sanitize_flint_cross_ir(&ir_text, context.target.os);
+        let ir_text = sanitize_flint_cross_ir(&ir_text, context.target);
         fs::write(&ir, ir_text).with_context(|| format!("cannot rewrite {}", ir.display()))?;
 
-        let object = context.work_dir.join("main.o");
+        let object = scratch.join("main.o");
         let mut compile_main = CommandSpec::new(PathBuf::from(&zig_path), context.root);
         compile_main.arg("cc");
         compile_main.arg("-target");
         compile_main.arg(context.target.zig_triple);
+        add_flint_target_flags(&mut compile_main, context.target);
         compile_main.arg("-O2");
         compile_main.arg("-c");
         compile_main.arg(ir.display().to_string());
         compile_main.arg("-o");
         compile_main.arg(object.display().to_string());
         compile_main.timeout(context.timeout);
+        isolate_flint_tool(&mut compile_main, &scratch, context.cache_root);
         let log_path = context.work_dir.join("compile-main.log");
         let output = exec::run(&compile_main, &log_path)?;
         if !output.success {
@@ -648,19 +669,21 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         commands.push(output);
         main_objects.push(object);
 
-        let entry_source = context.work_dir.join("flint_entry.c");
+        let entry_source = scratch.join("flint_entry.c");
         fs::write(&entry_source, FLINT_CROSS_ENTRY_C)?;
-        let entry_object = context.work_dir.join("flint_entry.o");
+        let entry_object = scratch.join("flint_entry.o");
         let mut compile_entry = CommandSpec::new(PathBuf::from(&zig_path), context.root);
         compile_entry.arg("cc");
         compile_entry.arg("-target");
         compile_entry.arg(context.target.zig_triple);
+        add_flint_target_flags(&mut compile_entry, context.target);
         compile_entry.arg("-O2");
         compile_entry.arg("-c");
         compile_entry.arg(entry_source.display().to_string());
         compile_entry.arg("-o");
         compile_entry.arg(entry_object.display().to_string());
         compile_entry.timeout(context.timeout);
+        isolate_flint_tool(&mut compile_entry, &scratch, context.cache_root);
         let log_path = context.work_dir.join("compile-entry.log");
         let output = exec::run(&compile_entry, &log_path)?;
         if !output.success {
@@ -673,57 +696,20 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
         main_objects.push(entry_object);
     }
 
-    let mut runtime_objects = Vec::new();
-    for source in ["runtime.c", "flint_aegis.c"] {
-        let source_path = runtime_dir.join(source);
-        let object_name = if source == "runtime.c" {
-            "runtime.o"
-        } else {
-            "flint_aegis.o"
-        };
-        let object_path = context.work_dir.join(object_name);
+    let runtime_objects = compile_flint_runtime(
+        context,
+        Path::new(&zig_path),
+        Path::new(&flintc_path),
+        &runtime_dir,
+        &scratch,
+        &mut commands,
+    )?;
 
-        let mut compile = CommandSpec::new(PathBuf::from(&zig_path), context.root);
-        compile.arg("cc");
-        compile.arg("-target");
-        compile.arg(context.target.zig_triple);
-        compile.arg("-O2");
-        compile.arg("-fno-pie");
-        compile.arg("-include");
-        compile.arg("stddef.h");
-        compile.arg("-include");
-        compile.arg("flint_aegis.h");
-        compile.arg("-c");
-        compile.arg("-I");
-        compile.arg(runtime_dir.display().to_string());
-        compile.arg(source_path.display().to_string());
-        compile.arg("-o");
-        compile.arg(object_path.display().to_string());
-        compile.timeout(context.timeout);
-
-        let log_path = context.work_dir.join(format!("compile-{object_name}.log"));
-        let output = exec::run(&compile, &log_path)?;
-        if !output.success {
-            bail!(
-                "zig cc failed compiling Flint runtime `{source}`; see {}",
-                log_path.display()
-            );
-        }
-        commands.push(output);
-        runtime_objects.push(object_path);
-    }
-
-    let artifact = if context.target.os == "windows" {
-        context
-            .work_dir
-            .join(format!("{}.exe", context.project.name))
-    } else {
-        context.work_dir.join(&context.project.name)
-    };
     let mut link = CommandSpec::new(PathBuf::from(&zig_path), context.root);
     link.arg("cc");
     link.arg("-target");
     link.arg(context.target.zig_triple);
+    add_flint_target_flags(&mut link, context.target);
     if context.target.abi == "musl" {
         link.arg("-static");
     }
@@ -739,6 +725,7 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
     link.arg("-lm");
     link.arg("-lpthread");
     link.timeout(context.timeout);
+    isolate_flint_tool(&mut link, &scratch, context.cache_root);
 
     let link_log = context.work_dir.join("link.log");
     let link_output = exec::run(&link, &link_log)?;
@@ -785,13 +772,247 @@ fn build_flint_cross(context: &BuildContext<'_>) -> Result<BuildResult> {
     })
 }
 
-fn sanitize_flint_cross_ir(ir: &str, os: &str) -> String {
-    let ir = ir.replace("@main", "@flint_entry");
-    if os == "macos" {
+fn sanitize_flint_cross_ir(ir: &str, target: &TargetSpec) -> String {
+    let ir = rename_ir_symbol(ir, "main", "flint_entry");
+    let ir = if target.arch == "riscv64" {
+        retarget_flint_ir(&ir, target.zig_triple)
+    } else {
+        ir
+    };
+    if target.os == "macos" {
         ir.replace("section \".rodata\"", "section \"__TEXT,__const\"")
     } else {
         ir
     }
+}
+
+fn rename_ir_symbol(ir: &str, from: &str, to: &str) -> String {
+    let needle = format!("@{from}");
+    let mut output = String::with_capacity(ir.len());
+    let mut rest = ir;
+    while let Some(position) = rest.find(&needle) {
+        output.push_str(&rest[..position]);
+        let after = rest[position + needle.len()..].chars().next();
+        if after.is_none_or(|ch| !(ch.is_ascii_alphanumeric() || "._-$".contains(ch))) {
+            output.push('@');
+            output.push_str(to);
+        } else {
+            output.push_str(&needle);
+        }
+        rest = &rest[position + needle.len()..];
+    }
+    output.push_str(rest);
+    output
+}
+
+fn retarget_flint_ir(ir: &str, triple: &str) -> String {
+    let mut output = String::with_capacity(ir.len());
+    for line in ir.lines() {
+        if line.starts_with("target triple = \"") {
+            output.push_str("target triple = \"");
+            output.push_str(triple);
+            output.push('"');
+        } else {
+            output.push_str(line);
+        }
+        output.push('\n');
+    }
+    output
+}
+
+fn isolate_flint_tool(spec: &mut CommandSpec, scratch: &Path, cache_root: Option<&Path>) {
+    let temp = scratch.join("tmp");
+    let _ = fs::create_dir_all(&temp);
+    for key in ["TMPDIR", "TMP", "TEMP"] {
+        spec.env(key, temp.display().to_string());
+    }
+    let zig_cache = cache_root
+        .map(|root| root.join("zig"))
+        .unwrap_or_else(|| scratch.join("zig-cache"));
+    spec.env(
+        "ZIG_LOCAL_CACHE_DIR",
+        zig_cache.join("local").display().to_string(),
+    );
+    spec.env(
+        "ZIG_GLOBAL_CACHE_DIR",
+        zig_cache.join("global").display().to_string(),
+    );
+}
+
+fn add_flint_target_flags(spec: &mut CommandSpec, target: &TargetSpec) {
+    if target.arch == "riscv64" {
+        spec.arg("-mabi=lp64d");
+    }
+}
+
+fn compile_flint_runtime(
+    context: &BuildContext<'_>,
+    zig_path: &Path,
+    flintc_path: &Path,
+    runtime_dir: &Path,
+    scratch: &Path,
+    commands: &mut Vec<CommandOutput>,
+) -> Result<Vec<PathBuf>> {
+    let objects = ["runtime.o", "flint_aegis.o"];
+    let key = flint_runtime_key(context, zig_path, flintc_path, runtime_dir)?;
+    let cache_dir = context
+        .cache_root
+        .map(|root| root.join("flint-runtime").join(&key));
+    if let Some(cache_dir) = &cache_dir
+        && objects.iter().all(|name| cache_dir.join(name).is_file())
+    {
+        let mut restored = Vec::new();
+        for name in objects {
+            let destination = scratch.join(name);
+            fs::copy(cache_dir.join(name), &destination).with_context(|| {
+                format!(
+                    "cannot restore cached Flint runtime object {}",
+                    destination.display()
+                )
+            })?;
+            restored.push(destination);
+        }
+        return Ok(restored);
+    }
+
+    let mut compiled = Vec::new();
+    for (source, object_name) in [
+        ("runtime.c", "runtime.o"),
+        ("flint_aegis.c", "flint_aegis.o"),
+    ] {
+        let source_path = runtime_dir.join(source);
+        let object_path = scratch.join(object_name);
+
+        let mut compile = CommandSpec::new(zig_path, context.root);
+        compile.arg("cc");
+        compile.arg("-target");
+        compile.arg(context.target.zig_triple);
+        add_flint_target_flags(&mut compile, context.target);
+        compile.arg("-O2");
+        compile.arg("-fno-pie");
+        compile.arg("-include");
+        compile.arg("stddef.h");
+        compile.arg("-include");
+        compile.arg("flint_aegis.h");
+        compile.arg("-c");
+        compile.arg("-I");
+        compile.arg(runtime_dir.display().to_string());
+        compile.arg(source_path.display().to_string());
+        compile.arg("-o");
+        compile.arg(object_path.display().to_string());
+        compile.timeout(context.timeout);
+        isolate_flint_tool(&mut compile, scratch, context.cache_root);
+
+        let log_path = context.work_dir.join(format!("compile-{object_name}.log"));
+        let output = exec::run(&compile, &log_path)?;
+        if !output.success {
+            bail!(
+                "zig cc failed compiling Flint runtime `{source}`; see {}",
+                log_path.display()
+            );
+        }
+        commands.push(output);
+        compiled.push(object_path);
+    }
+
+    if let Some(cache_dir) = &cache_dir {
+        store_flint_runtime(cache_dir, &compiled)?;
+    }
+    Ok(compiled)
+}
+
+fn flint_runtime_key(
+    context: &BuildContext<'_>,
+    zig_path: &Path,
+    flintc_path: &Path,
+    runtime_dir: &Path,
+) -> Result<String> {
+    let mut hasher = Sha256::new();
+    hash_field(&mut hasher, "flint-runtime-v1");
+    hash_field(&mut hasher, context.target.zig_triple);
+    hash_field(&mut hasher, context.target.arch);
+    hash_field(&mut hasher, context.target.abi);
+    hash_field(
+        &mut hasher,
+        &toolchain::version_of(&zig_path.display().to_string(), &["version"])
+            .unwrap_or_else(|| "unknown".to_string()),
+    );
+    hash_field(
+        &mut hasher,
+        &toolchain::version_of(&flintc_path.display().to_string(), &["--version"])
+            .unwrap_or_else(|| "unknown".to_string()),
+    );
+    for name in ["runtime.c", "flint_aegis.c", "flint_aegis.h"] {
+        hash_field(&mut hasher, name);
+        hash_field(
+            &mut hasher,
+            &crate::verify::sha256_file(&runtime_dir.join(name))?,
+        );
+    }
+    let digest = hasher.finalize();
+    let mut output = String::new();
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    Ok(output)
+}
+
+fn hash_field(hasher: &mut Sha256, value: &str) {
+    hasher.update((value.len() as u64).to_le_bytes());
+    hasher.update(value.as_bytes());
+}
+
+fn store_flint_runtime(cache_dir: &Path, objects: &[PathBuf]) -> Result<()> {
+    if objects.iter().all(|object| {
+        object
+            .file_name()
+            .map(|name| cache_dir.join(name).is_file())
+            .unwrap_or(false)
+    }) {
+        return Ok(());
+    }
+    let parent = cache_dir
+        .parent()
+        .ok_or_else(|| anyhow!("invalid Flint runtime cache path {}", cache_dir.display()))?;
+    fs::create_dir_all(parent).with_context(|| format!("cannot create {}", parent.display()))?;
+    let temp = parent.join(format!(
+        ".tmp-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = fs::remove_dir_all(&temp);
+    fs::create_dir_all(&temp).with_context(|| format!("cannot create {}", temp.display()))?;
+    for object in objects {
+        let name = object
+            .file_name()
+            .ok_or_else(|| anyhow!("Flint runtime object has no file name"))?;
+        fs::copy(object, temp.join(name))
+            .with_context(|| format!("cannot cache Flint runtime object {}", object.display()))?;
+    }
+    match fs::rename(&temp, cache_dir) {
+        Ok(()) => Ok(()),
+        Err(_) if cache_dir.is_dir() => {
+            let _ = fs::remove_dir_all(&temp);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = fs::remove_dir_all(&temp);
+            Err(error).with_context(|| {
+                format!("cannot install Flint runtime cache {}", cache_dir.display())
+            })
+        }
+    }
+}
+
+fn reset_dir(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_dir_all(path).with_context(|| format!("cannot reset {}", path.display()))?;
+    }
+    fs::create_dir_all(path).with_context(|| format!("cannot create {}", path.display()))
 }
 
 const FLINT_CROSS_ENTRY_C: &str = r#"#include <stdint.h>
@@ -1251,4 +1472,35 @@ fn find_executable(dir: &Path, preferred: &str) -> Result<PathBuf> {
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!("no executable artifact found in {}", dir.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flint_ir_symbol_rename_preserves_longer_names() {
+        let ir = "define i32 @main() {\n  call void @main_helper()\n}\n";
+        let renamed = rename_ir_symbol(ir, "main", "flint_entry");
+        assert!(renamed.contains("@flint_entry()"));
+        assert!(renamed.contains("@main_helper()"));
+        assert!(!renamed.contains("@flint_entry_helper"));
+    }
+
+    #[test]
+    fn flint_ir_riscv_retarget_is_hard_float_and_keeps_macos_section_fix() {
+        let ir =
+            "target triple = \"riscv64-unknown-linux-gnu\"\ndefine i32 @main() {\n  ret i32 0\n}\n";
+        let riscv = target::by_id("linux-riscv64").expect("riscv target");
+        let rewritten = sanitize_flint_cross_ir(ir, riscv);
+        assert!(rewritten.contains("target triple = \"riscv64-linux-gnu\""));
+        assert!(rewritten.contains("@flint_entry()"));
+
+        let macos = target::by_id("macos-arm64").expect("macos target");
+        let rewritten = sanitize_flint_cross_ir(
+            "target triple = \"aarch64-apple-darwin\"\nsection \".rodata\"\n",
+            macos,
+        );
+        assert!(rewritten.contains("section \"__TEXT,__const\""));
+    }
 }

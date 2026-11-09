@@ -133,7 +133,7 @@ is a promise about an untested platform.
 | Native builds | Cargo, CMake and Flint on the host target. |
 | Cargo cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Linux riscv64, Windows x86-64, macOS ARM64 and WASI (`wasm32-wasi`). Uses the installed target std or falls back to `-Z build-std` with `rust-src`; Zig handles linking and `rcodesign` ad-hoc signs Mach-O artifacts. |
 | CMake cross-builds | Linux x86-64 gnu/musl, Linux aarch64, Windows x86-64, Linux riscv64 and WASI (`wasm32-wasi`) through Zig compiler/archiver wrappers and a generated CMake toolchain file. |
-| Flint cross-builds | Linux x86-64/aarch64, Windows x86-64 and macOS ARM64 through `flintc` plus Zig-compiled Flint runtime sources. Windows/macOS use emitted LLVM IR with a small entry wrapper; macOS artifacts are ad-hoc signed. Flint WASI uses LLVM IR plus a small POSIX shim and Zig's WASI libc. |
+| Flint cross-builds | Linux x86-64/aarch64/riscv64, Windows x86-64 and macOS ARM64 through `flintc` plus Zig-compiled Flint runtime sources. Windows/macOS/RISC-V use emitted LLVM IR with a small entry wrapper; RISC-V IR is retargeted to Zig's hard-float `lp64d` ABI. macOS artifacts are ad-hoc signed. Flint WASI uses LLVM IR plus a small POSIX shim and Zig's WASI libc. |
 | Artifact inspection | Verified for ELF, PE/COFF, WebAssembly and Mach-O: format, architecture, executable kind, size and SHA-256. macOS artifacts are ad-hoc signed so they can run on a Mac. |
 | Runtime smoke test | Runs native artifacts directly, `linux-x86_64-musl` through `qemu-x86_64`, and WASI artifacts through `wasmtime`. A non-running artifact is never reported as executed. |
 | Local cache | Implemented and tested: content-addressed cache of successful final artifacts. Cache hits restore, re-hash, re-verify and, when execution is enabled, re-run the artifact with zero build commands. |
@@ -156,14 +156,16 @@ universal support claims.
 | `linux-x86_64` | 1 | Cargo, CMake, Flint | Inspected; glibc binary does not execute under Termux qemu |
 | `linux-aarch64` | 1 | Cargo, CMake, Flint | Inspected |
 | `windows-x86_64` | 2 | Cargo, CMake, Flint | Cargo/CMake executed on GitHub Actions Windows x64; Flint cross-built, Windows Flint execution pending; inspect-only on Termux |
-| `linux-riscv64` | 3 | Cargo, CMake | Inspected; experimental |
+| `linux-riscv64` | 3 | Cargo, CMake, Flint | Inspected; Flint uses the `lp64d` ABI; experimental target |
 | `wasm32-wasi` | 3 | Cargo, CMake, Flint | Executed with wasmtime |
 | `macos-arm64` | 2 | Cargo, Flint | Cargo cross-built, ad-hoc signed and executed on GitHub Actions macOS arm64; Flint cross-built and signed, execution pending |
 
 Flint cross-builds use `flintc` for the target object/IR and Zig for the C runtime and link.
 Windows emits LLVM IR and links a MinGW PE; macOS emits LLVM IR, links a Mach-O and
-ad-hoc signs it. Android Flint builds run natively on the Android host; RISC-V Flint
-remains experimental. Cargo cross-compilation uses the installed target `std` when present; otherwise OmniBuild
+ad-hoc signs it. Android Flint builds run natively on the Android host. RISC-V Flint
+re-emits LLVM IR, retargets the module to Zig's `riscv64-linux-gnu` triple and compiles it
+as hard-float `lp64d`, avoiding the soft-float objects that `flintc` emits directly. Cargo
+cross-compilation uses the installed target `std` when present; otherwise OmniBuild
 builds `std` from `rust-src` (`RUSTC_BOOTSTRAP=1`, `-Z build-std=std,panic_abort`).
 Cross-linking goes through Zig. Windows build-std additionally needs `llvm-dlltool` and
 `llvm-ar`. macOS builds use Zig for linking and `rcodesign` (`cargo install
@@ -184,11 +186,11 @@ Being explicit here is more useful than a longer feature list.
 - **Not a remote build service.** There are no hosted workers, remote scheduling,
   accounts, billing or dashboard. Some configuration fields for those ideas exist as
   placeholders.
-- **Not production-ready.** The cache is local and artifact-only; compiler intermediate
-  caching and shared caches are not implemented. CI runs the full Rust test suite on
-  Ubuntu, builds and runs the release binary on macOS and Windows, and runs Flint adapter
-  tests on Linux, macOS and Windows; full test-suite coverage on Windows and macOS is
-  still missing.
+- **Not production-ready.** The cache is local and stores final artifacts plus reusable
+  Flint runtime objects; shared/remote caches and broader compiler intermediate caching
+  are not implemented. CI runs the full Rust test suite on Ubuntu and builds/runs the
+  release binary on macOS and Windows. Flint adapter tests run locally when `FLINTC` is
+  provisioned; full test-suite coverage on Windows and macOS is still missing.
 - **Not every Rust target.** Cargo cross-builds cover the registry entries listed above,
   not the whole Rust target universe. Standard-library builds can take several minutes the
   first time. Windows is inspect-only on Termux and executed on a Windows runner; macOS
@@ -459,8 +461,10 @@ The cache key is derived from the source tree (excluding build outputs and the c
 itself), selected target fields, build mode, relevant configuration, lockfiles, selected
 environment variables and detected toolchain versions. A cache hit restores the artifact,
 re-hashes and re-inspects it, and re-runs it when execution is enabled. The cache stores a
-single final artifact plus its metadata; compiler intermediate caching and shared/remote
-caches are not implemented.
+single final artifact plus its metadata. Flint cross-builds additionally reuse
+Zig-compiled runtime objects keyed by runtime sources, compiler versions and target, so a
+changed Flint program does not recompile the unchanged runtime. Shared/remote caches are
+not implemented.
 
 Release manifests record the source path and Git state, toolchain versions, exact
 commands with arguments and working directory, logs, artifact hashes, cache key and
@@ -471,9 +475,12 @@ verification level. That is what makes a result auditable later.
 Commands are spawned directly rather than through a shell, which avoids shell quoting and
 injection bugs in OmniBuild's own invocation path. It does **not** sandbox the build.
 Cargo `build.rs`, CMake scripts, Flint build steps and compilers execute arbitrary project
-code with the permissions of the user running OmniBuild. Environment variables are passed
-through, and there is no network or filesystem isolation. Do not run OmniBuild on
-untrusted repositories without an external sandbox or container.
+code with the permissions of the user running OmniBuild. Flint cross-builds use a fresh
+per-target scratch directory, point `TMPDIR`/`TMP`/`TEMP` at it, and keep Zig caches under
+the project cache; this prevents stale intermediates and host-temp leakage, but it is not a
+security boundary. Environment variables are passed through, and there is no network or
+filesystem isolation. Do not run OmniBuild on untrusted repositories without an external
+sandbox or container.
 
 ### Extending OmniBuild
 
@@ -585,7 +592,7 @@ images.
 | `.tar.gz`/`.zip` release archives | `src/package.rs` | `package_writes_verified_tar_and_zip_archives`; archive hashes and `SHA256SUMS` are checked. |
 | Cargo WASI | `src/adapter.rs`, `src/build.rs` | `release_builds_and_executes_wasm_cargo_target_when_tools_are_available`. |
 | CMake WASI | `src/adapter.rs` | `release_builds_and_executes_wasm_cmake_target_when_tools_are_available`. |
-| Flint cross-builds | `src/adapter.rs` | `release_builds_and_executes_flint_cross_target_when_tools_are_available`, `release_builds_flint_windows_target_when_tools_are_available` and `release_builds_flint_macos_target_when_tools_are_available`; Windows/macOS execution requires a working Flint compiler on those hosts. |
+| Flint cross-builds | `src/adapter.rs`, `src/plan.rs` | `release_builds_and_executes_flint_cross_target_when_tools_are_available`, `release_builds_flint_riscv_target_when_tools_are_available`, `release_builds_flint_windows_target_when_tools_are_available` and `release_builds_flint_macos_target_when_tools_are_available`; Windows/macOS execution requires a working Flint compiler on those hosts. |
 | Flint WASI | `src/adapter.rs` | `release_builds_and_executes_flint_wasi_target_when_tools_are_available`; also verified manually on Termux. |
 | Rust cross-builds | `src/adapter.rs`, `src/plan.rs` | `release_builds_and_executes_rust_cross_target_when_tools_are_available`; manual Termux runs for gnu/aarch64/riscv64 (inspected) and Windows (PE inspected). |
 | WASI execution | `src/build.rs` (`wasmtime`) | Wasm tests assert level `executed`. |
@@ -685,7 +692,7 @@ These are current, intentional limits, not a wish list:
 |---|---|
 | Build systems | Only Cargo, CMake and Flint have adapters. Go, npm, Maven, Gradle, SwiftPM and dotnet are detected but not built. |
 | Monorepos | One primary project per run; the whole repository is not built as a graph. |
-| Flint RISC-V | The emitted object uses a soft-float ABI that does not match Zig's RISC-V runtime/CRT, so Flint RISC-V cross-linking is not supported yet. |
+| Flint RISC-V | `flintc` emits soft-float objects directly, so OmniBuild re-emits and retargets LLVM IR to Zig's hard-float `lp64d` ABI. The fixture is built and inspected, but not executed because no RISC-V runner is provisioned. |
 | Flint Android cross-builds | Need a native Android toolchain/NDK; Android Flint builds currently run on the Android host. |
 | Flint WASI | Verified for the fixture, but command execution returns `ENOSYS` and signal, process-clock and pthread behavior is limited. |
 | Flint CI provision | The pinned upstream Flint revision does not build cleanly on hosted Linux, macOS and Windows images, so Flint adapter tests skip on this repository's CI unless `FLINTC` is supplied. |
@@ -693,8 +700,8 @@ These are current, intentional limits, not a wish list:
 | Windows toolchain | MinGW/GNU only; MSVC-native builds are not implemented. |
 | Runtime evidence | OmniBuild Windows/macOS artifacts are executed on native CI runners, not on Termux. Flint Windows/macOS artifacts are cross-built but await a working Flint compiler on those hosts. glibc `linux-x86_64` is inspect-only under Termux qemu. |
 | Testing | `verification.run_tests` is an artifact smoke test, not the project's test suite. |
-| Cache | Local and artifact-only; no compiler intermediate cache, shared cache or remote cache. |
-| Isolation | No sandbox. Build scripts run with the invoking user's permissions and network access. |
+| Cache | Local final-artifact cache plus reusable Flint runtime objects; no shared or remote cache. |
+| Isolation | No sandbox. Flint cross-builds use per-target scratch dirs and isolated temp/Zig cache paths; build scripts still run with the invoking user's permissions and network access. |
 | Distribution | No crates.io, Termux, apt, Homebrew, winget, scoop or choco packages yet. |
 | Stability | 0.1.1 is experimental; the CLI and manifest schema may change. |
 
@@ -702,12 +709,12 @@ These are current, intentional limits, not a wish list:
 
 Deferred, not implemented:
 
-- Shared/remote cache and compiler intermediate caching.
+- Shared/remote caches and compiler intermediate caching beyond Flint runtime objects.
 - Remote workers, scheduling, accounts, billing and a dashboard.
 - Go, Java, .NET, JavaScript, Python and Swift adapters.
 - Real test-suite execution and a `tested` verification level.
 - Full test-suite runs on native Windows and macOS runners, beyond the artifact smoke test.
-- Flint RISC-V ABI alignment and a native Android cross-build path with an NDK.
+- A native Android Flint cross-build path with an NDK and a RISC-V execution runner.
 - A current Flint compiler build suitable for CI, so native Windows/macOS Flint execution can run automatically.
 - Broader Flint WASI runtime coverage (commands, signals, threads).
 - Package-manager distribution: Termux `pkg`, apt, PowerShell (`winget`/`scoop`/`choco`)

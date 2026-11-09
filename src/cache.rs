@@ -10,7 +10,7 @@ use std::{
 };
 use walkdir::{DirEntry, WalkDir};
 
-const CACHE_SCHEMA_VERSION: u32 = 1;
+const CACHE_SCHEMA_VERSION: u32 = 2;
 const ENV_KEYS: &[&str] = &[
     "PATH",
     "TMPDIR",
@@ -215,6 +215,8 @@ fn compute_key(input: &KeyInput<'_>, skip: &[PathBuf]) -> Result<String> {
     hash_text(&mut hasher, input.target.arch);
     hash_text(&mut hasher, input.target.abi);
     hash_text(&mut hasher, input.target.llvm_triple);
+    hash_text(&mut hasher, input.target.flint_triple);
+    hash_text(&mut hasher, input.target.zig_triple);
     hash_text(&mut hasher, &input.config.build.mode);
 
     let config_bytes = serde_json::to_vec(input.config)?;
@@ -234,6 +236,23 @@ fn compute_key(input: &KeyInput<'_>, skip: &[PathBuf]) -> Result<String> {
         }
     }
 
+    if input.build_system == "Flint"
+        && let Some(flintc) = toolchain::check_tool("flintc", Some("FLINTC"), None).path
+        && let Some(root) = Path::new(&flintc).parent()
+    {
+        for name in [
+            "runtime/runtime.c",
+            "runtime/flint_aegis.c",
+            "runtime/flint_aegis.h",
+        ] {
+            let path = root.join(name);
+            if path.is_file() {
+                hash_text(&mut hasher, name);
+                hasher.update(crate::verify::sha256_file(&path)?.as_bytes());
+            }
+        }
+    }
+
     for key in ENV_KEYS {
         hash_text(&mut hasher, key);
         match std::env::var_os(key) {
@@ -249,7 +268,7 @@ fn compute_key(input: &KeyInput<'_>, skip: &[PathBuf]) -> Result<String> {
     }
 
     let digest = hasher.finalize();
-    let mut output = String::from("v1-");
+    let mut output = String::from("v2-");
     for byte in digest {
         use std::fmt::Write as _;
         let _ = write!(&mut output, "{byte:02x}");
@@ -333,6 +352,7 @@ fn toolchain_identity(build_system: &str) -> BTreeMap<String, String> {
         ],
         "Flint" => &[
             ("flintc", Some("FLINTC"), &["--version"]),
+            ("zig", None, &["version"]),
             ("clang", None, &["--version"]),
         ],
         "CMake" => &[

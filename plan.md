@@ -1503,16 +1503,19 @@ omnibuild/
   Reproduce a Windows hash only with the same inputs and current OmniBuild.
 - Zig glibc dynamic binaries segfault under Termux qemu; use
   `linux-x86_64-musl` for executed Linux x86-64 verification.
-- Flint cross-link is implemented for Linux x86_64/aarch64 and WASI. Windows and
-  riscv64 Flint targets are not implemented.
+- Flint cross-link is implemented for Linux x86_64/aarch64/riscv64, Windows, macOS and
+  WASI. RISC-V re-emits LLVM IR and retargets it to Zig's hard-float `lp64d` ABI; Android
+  cross-builds still need a native NDK/toolchain. Windows/macOS Flint execution awaits a
+  working Flint compiler on those hosts.
 - Windows artifacts can be inspected but not executed here. PE hashes are profile- and
   source-sensitive: the earlier manual PE predates `70765e8` and used
   `CARGO_PROFILE_RELEASE_LTO=false`, while self-hosted builds use `lto = "thin"`.
   Reproduce a hash only with the same source and profile.
 - macOS ARM64 artifacts are cross-built and ad-hoc signed here; execution is verified on
   macOS, not on this Termux device.
-- The cache is local and artifact-based; shared/remote caches, compiler
-  intermediate caching, remote workers and the dashboard are not implemented.
+- The cache is local and stores final artifacts plus reusable Flint runtime objects;
+  shared/remote caches, broader compiler intermediate caching, remote workers and the
+  dashboard are not implemented.
 - Cache keys hash the whole project tree, so generated files outside `dist/` and
   `.omnibuild-cache/` intentionally invalidate the cache.
 - Project detection is marker-based; it does not yet parse full build graphs.
@@ -1525,9 +1528,9 @@ omnibuild/
   manifest note.
 - CMake cross targets are build/inspect except `linux-x86_64-musl` (qemu) and
   `wasm32-wasi` (wasmtime), which execute.
-- CI passed for the pre-WASI `main` commit (run `42332796838`); the WASI, Rust cross
-  and Flint WASI commits are local and not yet pushed. CI now provisions Zig,
-  wasmtime, `rust-src`, the WASI std and qemu, but not Flint.
+- CI provisions Zig, wasmtime, `rust-src`, the WASI std and qemu, but not Flint. The
+  pinned upstream Flint revision does not build cleanly on hosted Linux/macOS/Windows
+  images, so Flint adapter tests skip on CI unless `FLINTC` is supplied.
 
 ## G. Verification protocol
 

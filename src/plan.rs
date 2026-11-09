@@ -387,11 +387,13 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                                 spec.os
                             )),
                         )
-                    } else if spec.os == "linux" && !matches!(spec.arch, "x86_64" | "aarch64") {
+                    } else if spec.os == "linux"
+                        && !matches!(spec.arch, "x86_64" | "aarch64" | "riscv64")
+                    {
                         (
                             ReadinessStatus::Experimental,
                             Some(format!(
-                                "Flint cross-link is provisioned for x86_64/aarch64 Linux; `{}` is not tested",
+                                "Flint cross-link is provisioned for x86_64/aarch64/riscv64 Linux; `{}` is not tested",
                                 spec.arch
                             )),
                         )
@@ -429,12 +431,15 @@ pub fn target_readiness(spec: &'static TargetSpec, adapter: &str) -> Readiness {
                                 ),
                             )
                         } else {
-                            let reason = match spec.os {
-                                "windows" => {
+                            let reason = match (spec.os, spec.arch) {
+                                ("windows", _) => {
                                     "cross-links the Flint object with Zig's MinGW runtime; execute on Windows"
                                 }
-                                "macos" => {
+                                ("macos", _) => {
                                     "cross-links the Flint object with Zig's macOS runtime and ad-hoc signs it"
+                                }
+                                ("linux", "riscv64") => {
+                                    "re-emits Flint IR for Zig's hard-float RISC-V ABI, then links against the Zig-built C runtime"
                                 }
                                 _ => "cross-links the Flint object with a Zig-built C runtime",
                             };

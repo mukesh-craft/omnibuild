@@ -623,6 +623,72 @@ fn release_builds_and_executes_flint_cross_target_when_tools_are_available() {
 }
 
 #[test]
+fn release_builds_flint_riscv_target_when_tools_are_available() {
+    if which::which("zig").is_err() {
+        return;
+    }
+    let Some(flintc) = flintc_path() else {
+        return;
+    };
+    let runtime = flintc.parent().map(|root| root.join("runtime"));
+    if !runtime
+        .as_ref()
+        .map(|runtime| runtime.join("runtime.c").is_file())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let dir = temp_project("release-flint-riscv");
+    fs::write(
+        dir.join("main.fl"),
+        include_str!("fixtures/flint-hello/main.fl"),
+    )
+    .unwrap();
+
+    let mut command = Command::new(binary());
+    command.env("FLINTC", &flintc);
+    command.args([
+        "release",
+        "--path",
+        dir.to_str().unwrap(),
+        "--target",
+        "linux-riscv64",
+        "--format",
+        "json",
+    ]);
+
+    let output = command.output().expect("run omnibuild");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let result = &report["build"]["results"][0];
+    assert_eq!(result["target"], "linux-riscv64");
+    assert_eq!(result["adapter"], "flint");
+    assert_eq!(result["status"], "success");
+    assert_eq!(result["level"], "inspected");
+    assert_eq!(result["artifact"]["format"], "ELF");
+    assert_eq!(result["artifact"]["architecture"], "riscv64");
+
+    let artifact = result["artifact"]["path"].as_str().expect("artifact path");
+    if let Ok(header) = Command::new("readelf").args(["-h", artifact]).output()
+        && header.status.success()
+    {
+        let text = String::from_utf8_lossy(&header.stdout);
+        assert!(
+            text.contains("double-float ABI"),
+            "Flint RISC-V artifact must use the lp64d ABI: {text}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn release_builds_flint_windows_target_when_tools_are_available() {
     if which::which("zig").is_err() {
         return;

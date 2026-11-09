@@ -79,6 +79,7 @@ pub fn run(
     let timeout = Duration::from_secs(config.build.timeout_secs.max(1));
     let adapter = adapter::for_build_system(&primary.build_system);
     let cache_store = Cache::new(source, config);
+    let cache_root = cache_store.enabled(config).then(|| cache_store.root());
 
     let mut results = Vec::new();
     let mut release_targets = Vec::new();
@@ -114,6 +115,7 @@ pub fn run(
             target: spec,
             mode: &config.build.mode,
             work_dir: &work_dir,
+            cache_root,
             timeout,
         };
 
