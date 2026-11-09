@@ -290,7 +290,17 @@ fn package_writes_verified_tar_and_zip_archives() {
     assert!(listing.contains("manifest.json"));
     assert!(listing.contains("release.json"));
     assert!(listing.contains("SHA256SUMS"));
-    assert!(listing.contains("artifact/"));
+    assert!(!listing.contains("artifact/"));
+    assert!(
+        archives.iter().all(|archive| {
+            archive["archive"]
+                .as_str()
+                .and_then(|path| Path::new(path).file_name())
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("omnibuild-0.1.1-"))
+        }),
+        "archive naming should use version-target layout"
+    );
 
     if which::which("zip").is_ok() {
         let zip_archive = archives
@@ -315,7 +325,7 @@ fn package_writes_verified_tar_and_zip_archives() {
             assert!(listing.contains("manifest.json"));
             assert!(listing.contains("release.json"));
             assert!(listing.contains("SHA256SUMS"));
-            assert!(listing.contains("artifact/"));
+            assert!(!listing.contains("artifact/"));
         }
     }
 

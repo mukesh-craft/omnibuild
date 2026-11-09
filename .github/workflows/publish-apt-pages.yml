@@ -1,0 +1,72 @@
+name: Publish APT repository to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag containing Linux archives
+        required: true
+        default: v0.1.1
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y dpkg-dev gnupg
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/release
+          gh release download "${{ inputs.release_tag }}" --repo "${{ github.repository }}" --dir dist/release
+      - name: Build packages
+        run: |
+          set -euo pipefail
+          version="${{ inputs.release_tag }}"; version="${version#v}"
+          if [ -f "dist/release/omnibuild-${version}-linux-x86_64-musl.tar.gz" ]; then
+            packaging/debian/build-deb.sh "dist/release/omnibuild-${version}-linux-x86_64-musl.tar.gz" "$version" amd64 dist/debs
+          fi
+          for archive in dist/release/omnibuild-*-linux-aarch64.tar.gz; do
+            [ -e "$archive" ] || continue
+            packaging/debian/build-deb.sh "$archive" "$version" arm64 dist/debs
+          done
+      - name: Build and sign APT repository
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
+        run: |
+          if [ -n "${APT_GPG_PRIVATE_KEY:-}" ] && [ -n "${APT_GPG_KEY_ID:-}" ]; then
+            export GNUPGHOME="$RUNNER_TEMP/gnupg"
+            mkdir -m 700 -p "$GNUPGHOME"
+            printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            echo "APT_GPG_PRIVATE_KEY/APT_GPG_KEY_ID not set; publishing an unsigned repository for testing only." >&2
+          fi
+          packaging/apt/build-apt-repo.sh dist/debs dist/apt-repo stable OmniBuild
+          if [ -n "${APT_GPG_KEY_ID:-}" ]; then
+            gpg --batch --armor --export "$APT_GPG_KEY_ID" > dist/apt-repo/omnibuild.gpg.asc
+          fi
+          cp dist/apt-repo/omnibuild.gpg.asc dist/apt-repo/README.txt 2>/dev/null || printf 'Unsigned test repository. Do not use in production.\n' > dist/apt-repo/README.txt
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/apt-repo
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,177 @@
+name: Build release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to build assets for (source ref and version suffix)
+        required: true
+        default: v0.1.1
+      upload_to_release:
+        description: Attach generated archives and SHA256SUMS to the release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            os: ubuntu-latest
+            archive: tar.gz
+            binary: omnibuild
+            build: cargo build --release --locked
+            artifact: target/release/omnibuild
+          - target: linux-aarch64
+            os: ubuntu-24.04-arm
+            archive: tar.gz
+            binary: omnibuild
+            build: cargo build --release --locked
+            artifact: target/release/omnibuild
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+            binary: omnibuild
+            build: cargo build --release --locked
+            artifact: target/release/omnibuild
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+            binary: omnibuild
+            build: cargo build --release --locked
+            artifact: target/release/omnibuild
+          - target: windows-x86_64
+            os: windows-latest
+            archive: zip
+            binary: omnibuild.exe
+            build: cargo build --release --locked
+            artifact: target/release/omnibuild.exe
+          - target: windows-arm64
+            os: windows-11-arm
+            archive: zip
+            binary: omnibuild.exe
+            build: cargo build --release --locked
+            artifact: target/release/omnibuild.exe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-assets-${{ matrix.target }}
+      - name: Build
+        shell: bash
+        run: ${{ matrix.build }}
+      - name: Smoke test
+        shell: bash
+        run: |
+          "${{ matrix.artifact }}" --version
+          "${{ matrix.artifact }}" doctor
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          name="omnibuild-${version}-${{ matrix.target }}"
+          stage="dist/${name}"
+          mkdir -p "$stage"
+          cp "${{ matrix.artifact }}" "$stage/${{ matrix.binary }}"
+          cp README.md LICENSE COPYING "$stage/"
+          if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ] || [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            mkdir -p "$stage/scripts"
+            cp scripts/run-macos.sh "$stage/scripts/run-macos.sh"
+          fi
+          (
+            cd "$stage"
+            files=( "${{ matrix.binary }}" manifest.json release.json LICENSE COPYING README.md SHA256SUMS )
+            # create minimal release metadata for compatibility with archive expectations
+            printf '{"schema_version":1,"target":"%s","status":"native-release"}\n' "${{ matrix.target }}" > manifest.json
+            printf '{"schema_version":1,"target":"%s","version":"%s"}\n' "${{ matrix.target }}" "$version" > release.json
+            if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ] || [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+              files+=( scripts/run-macos.sh )
+            fi
+            shasum -a 256 "${files[@]}" > SHA256SUMS 2>/dev/null || sha256sum "${files[@]}" > SHA256SUMS
+            cd ..
+            if [ "${{ matrix.archive }}" = "zip" ]; then
+              if command -v 7z >/dev/null 2>&1; then 7z a "${name}.zip" "$name" >/dev/null; else zip -qr "${name}.zip" "$name"; fi
+            else
+              tar -czf "${name}.tar.gz" "$name"
+            fi
+          )
+      - name: Normalize archive root
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.release_tag }}"; version="${version#v}"
+          name="omnibuild-${version}-${{ matrix.target }}"
+          rm -rf "dist/${name}" "dist/tmp-${name}"
+          mkdir -p "dist/tmp-${name}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            if command -v unzip >/dev/null 2>&1; then unzip -q "dist/${name}.zip" -d dist/tmp; fi
+          else
+            tar -xzf "dist/${name}.tar.gz" -C dist/tmp
+          fi
+          # The previous step archived a named directory; flatten to archive root for package-manager compatibility.
+          src="dist/tmp/${name}"
+          if [ -d "$src" ]; then
+            stage="dist/root-${name}"
+            mkdir -p "$stage"
+            cp -R "$src"/. "$stage"/
+            ( cd "$stage"; shasum -a 256 * scripts/* 2>/dev/null > SHA256SUMS || sha256sum * scripts/* 2>/dev/null > SHA256SUMS || true )
+            rm -f "dist/${name}.${{ matrix.archive }}"
+            if [ "${{ matrix.archive }}" = "zip" ]; then
+              ( cd "$stage" && (command -v 7z >/dev/null 2>&1 && 7z a "../../dist/${name}.zip" * scripts >/dev/null || zip -qr "../../dist/${name}.zip" * scripts) )
+            else
+              tar -czf "dist/${name}.tar.gz" -C "$stage" .
+            fi
+          fi
+      - name: Checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          file="omnibuild-${{ inputs.release_tag }}-${{ matrix.target }}".${{ matrix.archive }}
+          file=${file/v0./0.}; file=${file/v/}
+          # normalize again
+          version="${{ inputs.release_tag }}"; version="${version#v}"
+          file="omnibuild-${version}-${{ matrix.target }}.${{ matrix.archive }}"
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum "$file" > "$file.sha256"; else shasum -a 256 "$file" > "$file.sha256"; fi
+          cat "$file.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-asset-${{ matrix.target }}
+          path: |
+            dist/omnibuild-*-${{ matrix.target }}.${{ matrix.archive }}
+            dist/omnibuild-*-${{ matrix.target }}.${{ matrix.archive }}.sha256
+          if-no-files-found: error
+
+  publish:
+    if: ${{ inputs.upload_to_release }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create SHA256SUMS
+        run: |
+          cd dist
+          sha256sum omnibuild-*.tar.gz omnibuild-*.zip 2>/dev/null | tee SHA256SUMS
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ inputs.release_tag }}"
+          files=(dist/SHA256SUMS)
+          for f in dist/omnibuild-*.tar.gz dist/omnibuild-*.zip; do [ -e "$f" ] && files+=("$f"); done
+          gh release upload "$version" "${files[@]}" --repo "${{ github.repository }}" --clobber

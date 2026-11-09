@@ -2,3 +2,5 @@
 /dist
 /.omnibuild-cache
 /omnibuild.yaml
+__pycache__/
+*.pyc

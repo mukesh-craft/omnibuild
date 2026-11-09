@@ -1371,9 +1371,6 @@ fn sign_macos_artifact(context: &BuildContext<'_>, artifact: &Path) -> Result<Co
 }
 
 fn write_windows_binutils(context: &BuildContext<'_>) -> Result<Option<String>> {
-    if context.target.arch != "x86_64" {
-        return Ok(None);
-    }
     let Some(dlltool) = toolchain::check_tool("llvm-dlltool", None, None)
         .path
         .or_else(|| toolchain::check_tool("dlltool", None, None).path)
@@ -1386,7 +1383,10 @@ fn write_windows_binutils(context: &BuildContext<'_>) -> Result<Option<String>> 
     else {
         return Ok(None);
     };
-    let prefix = "x86_64-w64-mingw32";
+    let prefix = match (context.target.arch, context.target.abi) {
+        ("aarch64", _) => "aarch64-w64-mingw32",
+        _ => "x86_64-w64-mingw32",
+    };
     for (name, program) in [
         (format!("{prefix}-dlltool"), &dlltool),
         (format!("{prefix}-ar"), &ar),

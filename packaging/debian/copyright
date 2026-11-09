@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: omnibuild
+Source: https://github.com/mukesh-craft/omnibuild
+
+Files: *
+Copyright: 2026 The OmniBuild Authors
+License: LicenseRef-OmniBuild-1.0 or GPL-2.0-only
+ The complete OmniBuild License 1.0 is installed at
+ /usr/share/doc/omnibuild/LICENSE.
+ .
+ The GPLv2 alternative is installed at /usr/share/doc/omnibuild/COPYING.

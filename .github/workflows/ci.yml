@@ -24,6 +24,46 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+      - run: python3 scripts/verify-packaging.py
+      - run: |
+          bash -n packaging/termux/omnibuild/build.sh
+          bash -n packaging/debian/build-deb.sh
+          bash -n packaging/apt/build-apt-repo.sh
+      - run: ruby -c packaging/homebrew/omnibuild.rb
+      - run: ruby -e 'require "yaml"; Dir["packaging/winget/**/*.yaml"].each { |f| YAML.safe_load_file(f) }'
+      - name: Build a test Debian package and APT repository
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          mkdir -p "$work/src"
+          printf '#!/bin/sh\necho "omnibuild 0.1.1"\n' >"$work/src/omnibuild"
+          chmod +x "$work/src/omnibuild"
+          tar -czf "$work/omnibuild-0.1.1-linux-x86_64-musl.tar.gz" \
+            -C "$work/src" omnibuild
+          packaging/debian/build-deb.sh \
+            "$work/omnibuild-0.1.1-linux-x86_64-musl.tar.gz" \
+            0.1.1 amd64 "$work/debs"
+          dpkg-deb --info "$work/debs/omnibuild_0.1.1_amd64.deb"
+          packaging/apt/build-apt-repo.sh \
+            "$work/debs" "$work/apt-repo" stable OmniBuild
+          test -f "$work/apt-repo/dists/stable/main/binary-amd64/Packages"
+          grep -q '^Package: omnibuild$' \
+            "$work/apt-repo/dists/stable/main/binary-amd64/Packages"
+          test -f "$work/apt-repo/dists/stable/Release"
+          printf 'deb [trusted=yes] file:%s stable main\n' "$work/apt-repo" |
+            sudo tee /etc/apt/sources.list.d/omnibuild-test.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y omnibuild
+          omnibuild --version
+          omnibuild doctor
+          sudo apt-get remove -y omnibuild
+          sudo rm -f /etc/apt/sources.list.d/omnibuild-test.list
+
   macos:
     runs-on: macos-latest
     steps:

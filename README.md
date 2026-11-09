@@ -11,7 +11,9 @@ and a machine that cannot natively run every target it builds for.
 > production build infrastructure. The verified target matrix is deliberately small,
 > and the CLI may change. Prebuilt Linux, Windows, Android and macOS archives are
 > attached to the [v0.1.1 release](https://github.com/mukesh-craft/omnibuild/releases/tag/v0.1.1).
-> The Windows and macOS archives have been executed on native CI runners.
+> The Windows and macOS archives have been executed on native CI runners. Package-manager
+> recipes for Termux, apt, Homebrew, winget, Scoop and Chocolatey are in the tree, but none
+> of those channels is published yet.
 
 ## Contents
 
@@ -21,6 +23,7 @@ and a machine that cannot natively run every target it builds for.
 - [What it can really do](#what-it-can-really-do)
 - [What OmniBuild is not](#what-omnibuild-is-not)
 - [Quick start](#quick-start)
+- [Package-manager packaging](#package-manager-packaging)
 - [Commands](#commands)
 - [How a run works](#how-a-run-works)
 - [Architecture and internals](#architecture-and-internals)
@@ -236,32 +239,43 @@ and check `SHA256SUMS`. The Windows archive has been executed on GitHub Actions
 verification remains inspect-only for Windows and macOS. There is no crates.io release
 yet.
 
-### Planned one-command installs
+### Package-manager packaging
 
-These package-manager paths are planned, not published yet:
+No package manager has a published OmniBuild package yet. The repository now contains
+validated recipes and manifests for the planned channels. They are intentionally not
+documented as installable until each external registry or repository is published and
+passes an install-and-run check.
+
+| Channel | In-tree package source | `v0.1.1` coverage | External step |
+|---|---|---|---|
+| Termux `pkg` | `packaging/termux/omnibuild/build.sh` | Android ARM64 | `termux-packages` PR or self-hosted repo |
+| Debian/Ubuntu `apt` | `packaging/debian/`, `packaging/apt/` | `amd64` from the static musl archive | Host and sign the apt repository |
+| macOS Homebrew | `packaging/homebrew/omnibuild.rb` | macOS ARM64 | Publish a tap |
+| Windows `winget` | `packaging/winget/manifests/` | Windows x64 | Submit to `microsoft/winget-pkgs` |
+| Windows `scoop` | `packaging/scoop/omnibuild.json` | Windows x64 | Publish a bucket |
+| Windows Chocolatey | `packaging/chocolatey/` | Windows x64 | `choco push` with an API key |
+
+The in-tree files can be tested locally:
 
 ```bash
-# Termux
-pkg install omnibuild
+# Build and install a Debian package from the static Linux archive.
+packaging/debian/build-deb.sh dist/release/omnibuild-0.1.1-linux-x86_64-musl.tar.gz \
+  0.1.1 amd64 dist/packages
+sudo apt install ./dist/packages/omnibuild_0.1.1_amd64.deb
 
-# Debian/Ubuntu
-sudo apt install omnibuild
-
-# macOS
-brew install omnibuild
-
-# Windows
-winget install omnibuild
-scoop install omnibuild
-choco install omnibuild
-
-# Any Rust host, after crates.io publishing
-cargo install omnibuild
+# Install the ARM64 Homebrew formula without a tap.
+brew install --formula ./packaging/homebrew/omnibuild.rb
 ```
 
-The planned order is Termux `pkg`, Debian/Ubuntu apt, Homebrew, then Windows package
-managers. Each package must pass an install-and-run check in CI before it is documented as
-available.
+The packaging CI job installs the synthetic `.deb` from a trusted local apt repository and
+runs `omnibuild --version` plus `omnibuild doctor`. The manual packaging workflow performs
+the same install-and-run check for the generated `.deb`, the local Homebrew formula and the
+Chocolatey package on native runners.
+
+See [`packaging/README.md`](packaging/README.md) for the exact `.deb`, apt repository,
+Termux, winget, Scoop and Chocolatey publication steps. The current gaps are real: there is
+no glibc Linux archive, no Linux ARM64 archive, no Intel macOS archive and no Windows ARM64
+archive, so those variants are not claimed.
 
 ### Self-hosting
 
@@ -581,7 +595,13 @@ Rust `rust-src` and the `wasm32-wasip1` std, Zig, wasmtime, CMake, Ninja and
 execution tests run in CI. Tests that need Flint skip unless `FLINTC` or `flintc` is
 available; the repository does not currently provision Flint on CI because the pinned
 upstream Flint revision does not build cleanly on the hosted Linux, macOS and Windows
-images.
+images. A separate packaging job runs `scripts/verify-packaging.py`, shell syntax checks,
+`ruby -c` for the Homebrew formula and a YAML parse for the Winget manifests.
+`.github/workflows/packages.yml` is the manual release packaging workflow; it builds the
+`.deb`, apt repository and Chocolatey package from a published release, installs the
+generated `.deb` and local Homebrew formula, and runs `--version`/`doctor` smoke checks. It
+attaches only the `.deb` and `.nupkg` to that release when `upload_to_release` is enabled;
+the generated apt repository remains a workflow artifact for hosting.
 
 ### Evidence map
 
@@ -590,6 +610,7 @@ images.
 | Artifact SHA-256 and inspection | `src/verify.rs` | Release tests assert the artifact hash; CI runs them. |
 | Local cache entries | `src/cache.rs` | `release_reuses_a_cached_artifact_on_the_second_run`. |
 | `.tar.gz`/`.zip` release archives | `src/package.rs` | `package_writes_verified_tar_and_zip_archives`; archive hashes and `SHA256SUMS` are checked. |
+| Package-manager metadata | `packaging/` | `scripts/verify-packaging.py` plus package-manager syntax/format checks in CI. |
 | Cargo WASI | `src/adapter.rs`, `src/build.rs` | `release_builds_and_executes_wasm_cargo_target_when_tools_are_available`. |
 | CMake WASI | `src/adapter.rs` | `release_builds_and_executes_wasm_cmake_target_when_tools_are_available`. |
 | Flint cross-builds | `src/adapter.rs`, `src/plan.rs` | `release_builds_and_executes_flint_cross_target_when_tools_are_available`, `release_builds_flint_riscv_target_when_tools_are_available`, `release_builds_flint_windows_target_when_tools_are_available` and `release_builds_flint_macos_target_when_tools_are_available`; Windows/macOS execution requires a working Flint compiler on those hosts. |
@@ -605,8 +626,11 @@ images.
 | `tests/cli.rs` | End-to-end CLI tests, including native builds, cross-builds, WASI, caching, packaging and Flint adapters. |
 | `tests/fixtures/` | Minimal Cargo, CMake and Flint projects used by the test suite. |
 | `scripts/run-macos.sh` | Removes quarantine, applies an ad-hoc signature if needed, and executes a macOS artifact. |
-| `.github/workflows/ci.yml` | Format, Clippy, tests, macOS build/run and Windows build/run. |
+| `scripts/verify-packaging.py` | Checks version and hash consistency across the Termux, Debian, Homebrew, winget, Scoop and Chocolatey metadata. |
+| `packaging/` | In-tree package recipes, manifests and publication notes for Termux, Debian/apt, Homebrew, winget, Scoop and Chocolatey. |
+| `.github/workflows/ci.yml` | Format, Clippy, tests, packaging metadata checks, macOS build/run and Windows build/run. |
 | `.github/workflows/verify-artifacts.yml` | Downloads published archives, verifies hashes and executes the macOS/Windows binaries on native runners. |
+| `.github/workflows/packages.yml` | Manually builds and install-tests `.deb`, apt repository, Homebrew and Chocolatey assets from a published release. |
 | `plan.md` | The longer product and engineering plan behind the implementation. |
 | `Cargo.toml`, `Cargo.lock` | Rust package metadata and locked dependency graph. |
 | `README.md`, `LICENSE`, `COPYING` | User documentation, the OmniBuild License 1.0 and the GPLv2 alternative text. |
@@ -702,7 +726,7 @@ These are current, intentional limits, not a wish list:
 | Testing | `verification.run_tests` is an artifact smoke test, not the project's test suite. |
 | Cache | Local final-artifact cache plus reusable Flint runtime objects; no shared or remote cache. |
 | Isolation | No sandbox. Flint cross-builds use per-target scratch dirs and isolated temp/Zig cache paths; build scripts still run with the invoking user's permissions and network access. |
-| Distribution | No crates.io, Termux, apt, Homebrew, winget, scoop or choco packages yet. |
+| Distribution | Package recipes and manifests for Termux, apt, Homebrew, winget, Scoop and Chocolatey are in the tree, but none is published in an external registry yet. No crates.io release. |
 | Stability | 0.1.1 is experimental; the CLI and manifest schema may change. |
 
 ## Roadmap
@@ -717,8 +741,9 @@ Deferred, not implemented:
 - A native Android Flint cross-build path with an NDK and a RISC-V execution runner.
 - A current Flint compiler build suitable for CI, so native Windows/macOS Flint execution can run automatically.
 - Broader Flint WASI runtime coverage (commands, signals, threads).
-- Package-manager distribution: Termux `pkg`, apt, PowerShell (`winget`/`scoop`/`choco`)
-  and macOS Homebrew.
+- Publishing the in-tree Termux, apt, Homebrew, winget, Scoop and Chocolatey packages,
+  including registry review, external repository hosting, signing keys and install-and-run
+  verification on each platform.
 
 ## Contributing
 

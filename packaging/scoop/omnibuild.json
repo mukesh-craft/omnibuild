@@ -1,0 +1,36 @@
+{
+  "version": "0.1.1",
+  "description": "Local-first build orchestration and artifact verification",
+  "homepage": "https://github.com/mukesh-craft/omnibuild",
+  "license": {
+    "identifier": "LicenseRef-OmniBuild-1.0|GPL-2.0-only",
+    "url": "https://github.com/mukesh-craft/omnibuild/blob/main/LICENSE"
+  },
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/mukesh-craft/omnibuild/releases/download/v0.1.1/omnibuild-0.1.1-windows-x86_64.zip",
+      "hash": "fc20b2030e9d08ad3576de2138e6ee147fd875e59ff1cbed52d68cf4dfd2632b"
+    },
+    "arm64": {
+      "url": "https://github.com/mukesh-craft/omnibuild/releases/download/v0.1.1/omnibuild-0.1.1-windows-arm64.zip",
+      "hash": "REPLACE_WITH_WINDOWS_ARM64_SHA256"
+    }
+  },
+  "bin": "omnibuild.exe",
+  "checkver": {
+    "github": "https://github.com/mukesh-craft/omnibuild"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/mukesh-craft/omnibuild/releases/download/v$version/omnibuild-$version-windows-x86_64.zip"
+      },
+      "arm64": {
+        "url": "https://github.com/mukesh-craft/omnibuild/releases/download/v$version/omnibuild-$version-windows-arm64.zip"
+      }
+    },
+    "hash": {
+      "url": "$baseurl/SHA256SUMS"
+    }
+  }
+}

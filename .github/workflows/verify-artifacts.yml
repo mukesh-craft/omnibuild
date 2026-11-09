@@ -35,6 +35,7 @@ jobs:
           codesign --verify --verbose=2 dist/omnibuild
           codesign -dv --verbose=4 dist/omnibuild 2>&1
           dist/omnibuild --version
+          dist/omnibuild doctor
           dist/omnibuild targets | head -20
 
   windows:
@@ -62,6 +63,8 @@ jobs:
           Get-ChildItem dist/win
           Get-FileHash dist/win/omnibuild.exe -Algorithm SHA256 | Format-List
           & dist/win/omnibuild.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & dist/win/omnibuild.exe doctor
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & dist/win/omnibuild.exe targets | Select-Object -First 20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,0 +1,157 @@
+name: Build package assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag to package
+        required: true
+        default: v0.1.1
+      upload_to_release:
+        description: Attach generated .deb and .nupkg files to the release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  linux-packages:
+    name: Debian and APT packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev gnupg
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/release
+          gh release download "${{ inputs.release_tag }}" \
+            --repo "${{ github.repository }}" \
+            --dir dist/release
+      - name: Validate checked-in packaging metadata
+        run: |
+          curl -fsSL "https://github.com/${{ github.repository }}/archive/refs/tags/${{ inputs.release_tag }}.tar.gz" \
+            -o dist/source.tar.gz
+          python3 scripts/verify-packaging.py \
+            --sums dist/release/SHA256SUMS \
+            --assets dist/release \
+            --source-archive dist/source.tar.gz
+          bash -n packaging/termux/omnibuild/build.sh
+          bash -n packaging/debian/build-deb.sh
+          bash -n packaging/apt/build-apt-repo.sh
+          ruby -c packaging/homebrew/omnibuild.rb
+          ruby -e 'require "yaml"; Dir["packaging/winget/**/*.yaml"].each { |f| YAML.safe_load_file(f) }'
+      - name: Build amd64 package
+        run: |
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          archive="dist/release/omnibuild-${version}-linux-x86_64-musl.tar.gz"
+          test -f "$archive"
+          packaging/debian/build-deb.sh "$archive" "$version" amd64 dist/debs
+          dpkg-deb --info "dist/debs/omnibuild_${version}_amd64.deb"
+          dpkg-deb --contents "dist/debs/omnibuild_${version}_amd64.deb"
+      - name: Install and run the Debian package
+        run: |
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          sudo apt-get install -y "./dist/debs/omnibuild_${version}_amd64.deb"
+          omnibuild --version
+          omnibuild doctor
+      - name: Build arm64 package when the asset exists
+        run: |
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          for archive in dist/release/omnibuild-*-linux-aarch64.tar.gz; do
+            [ -e "$archive" ] || continue
+            packaging/debian/build-deb.sh "$archive" "$version" arm64 dist/debs
+          done
+      - name: Build APT repository
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
+        run: |
+          if [ -n "${APT_GPG_PRIVATE_KEY:-}" ] && [ -n "${APT_GPG_KEY_ID:-}" ]; then
+            export GNUPGHOME="$RUNNER_TEMP/gnupg"
+            mkdir -m 700 -p "$GNUPGHOME"
+            printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          fi
+          packaging/apt/build-apt-repo.sh dist/debs dist/apt-repo stable OmniBuild
+          find dist/apt-repo -type f | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-packages
+          path: |
+            dist/debs/*.deb
+            dist/apt-repo
+          if-no-files-found: error
+
+  homebrew-package:
+    name: Homebrew formula
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and run the formula
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew install --formula ./packaging/homebrew/omnibuild.rb
+          omnibuild --version
+          omnibuild doctor
+          brew uninstall omnibuild
+
+  windows-packages:
+    name: Chocolatey package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack Chocolatey package
+        shell: pwsh
+        working-directory: packaging/chocolatey
+        run: |
+          choco pack omnibuild.nuspec --output-directory "$PWD\..\..\dist\packages"
+          Get-ChildItem "$PWD\..\..\dist\packages"
+      - name: Install and run the package
+        shell: pwsh
+        run: |
+          choco install omnibuild --source "$PWD\dist\packages" --force --yes --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            Get-ChildItem "$env:ChocolateyInstall\logs" -Filter "chocolatey.log" |
+              ForEach-Object { Get-Content $_.FullName -Tail 200 }
+            exit $LASTEXITCODE
+          }
+          omnibuild --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          omnibuild doctor
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          omnibuild targets | Select-Object -First 20
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chocolatey-package
+          path: dist/packages/*.nupkg
+          if-no-files-found: error
+
+  upload:
+    name: Attach packages to release
+    if: ${{ inputs.upload_to_release }}
+    needs:
+      - linux-packages
+      - windows-packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Upload generated packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find dist -type f \( -name '*.deb' -o -name '*.nupkg' \) -print0 |
+            xargs -0 gh release upload "${{ inputs.release_tag }}" \
+              --repo "${{ github.repository }}" \
+              --clobber

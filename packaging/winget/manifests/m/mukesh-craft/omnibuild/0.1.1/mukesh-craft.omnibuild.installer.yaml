@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+
+PackageIdentifier: mukesh-craft.omnibuild
+PackageVersion: 0.1.1
+InstallerType: zip
+NestedInstallerType: portable
+ReleaseDate: "2026-11-08"
+Installers:
+- Architecture: x64
+  NestedInstallerFiles:
+  - RelativeFilePath: omnibuild.exe
+    PortableCommandAlias: omnibuild
+  InstallerUrl: https://github.com/mukesh-craft/omnibuild/releases/download/v0.1.1/omnibuild-0.1.1-windows-x86_64.zip
+  InstallerSha256: FC20B2030E9D08AD3576DE2138E6EE147FD875E59FF1CBED52D68CF4DFD2632B
+ManifestType: installer
+ManifestVersion: 1.10.0
+- Architecture: arm64
+  NestedInstallerFiles:
+  - RelativeFilePath: omnibuild.exe
+    PortableCommandAlias: omnibuild
+  InstallerUrl: https://github.com/mukesh-craft/omnibuild/releases/download/v0.1.1/omnibuild-0.1.1-windows-arm64.zip
+  InstallerSha256: REPLACE_WITH_WINDOWS_ARM64_SHA256

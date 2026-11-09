@@ -1540,3 +1540,201 @@ Every sprint must end with:
 3. `cargo test`
 4. A focused end-to-end run of the new command against the fixtures.
 5. A truthful update to this addendum recording what was verified and what was not.
+
+---
+
+# Package-Manager Distribution Addendum (2026-11-09)
+
+This section covers the Phase 8 work: package-manager distribution through Termux
+`pkg`, Debian/Ubuntu `apt`, Windows `winget`/`scoop`/`choco`, and macOS Homebrew.
+The goal is one documented install command per platform, backed by release artifacts
+whose hashes are verified before publication.
+
+## A. Artifact and package matrix
+
+| Manager | Input artifact for `v0.1.1` | Package status |
+|---|---|---|
+| Termux `pkg` | `omnibuild-0.1.1-aarch64-linux-android.tar.gz`, or the GitHub source tarball | Recipe ready in-tree; official `pkg install` needs `termux-packages` acceptance or a self-hosted repo |
+| Debian/Ubuntu `apt` | `omnibuild-0.1.1-linux-x86_64-musl.tar.gz` | `amd64` `.deb` and apt-repo tooling ready; `arm64` needs a `linux-aarch64` asset |
+| macOS Homebrew | `omnibuild-0.1.1-aarch64-apple-darwin.tar.gz` | ARM64 formula ready for a tap; Intel is blocked until a `x86_64-apple-darwin` asset exists |
+| Windows `winget` | `omnibuild-0.1.1-windows-x86_64.zip` | Manifest set ready; submission to `microsoft/winget-pkgs` is external |
+| Windows `scoop` | `omnibuild-0.1.1-windows-x86_64.zip` | Manifest ready for a bucket |
+| Windows `choco` | `omnibuild-0.1.1-windows-x86_64.zip` | Nuspec and install script ready; `choco push` is external |
+
+The static musl Linux build is used for the `amd64` `.deb` because it has no glibc
+runtime dependency and runs on both Debian and Ubuntu. The `.deb` should not be
+described as a Debian-archive package; it is a self-hosted package and repository.
+
+## B. Research findings
+
+### Termux `pkg`
+
+- Termux packages are built from `termux-packages/packages/<name>/build.sh` recipes.
+  A Rust package normally calls `termux_setup_rust`, builds with
+  `cargo build --target "$CARGO_TARGET_NAME" --release`, and installs into
+  `$TERMUX_PREFIX/bin`.
+- `pkg install omnibuild` only works after the recipe is accepted into the official
+  repository, or after users add a self-hosted Termux repository.
+- The official repository expects a maintainable package, source checksum, license
+  metadata, and target-specific build behavior. This project's Android target is
+  ARM64 only.
+- The recipe in `packaging/termux/omnibuild/build.sh` uses the `v0.1.1` source
+  tarball and its SHA-256. It is intended as the starting point for a
+  `termux-packages` pull request, not as proof that the package is published.
+
+### Debian/Ubuntu `apt`
+
+- A `.deb` can be built directly with `dpkg-deb`. Package metadata belongs in
+  `DEBIAN/control`; documentation belongs under `/usr/share/doc/<package>/`.
+- An apt repository needs `pool/` packages plus per-component `Packages` indexes,
+  a `Release` file, and signing (`InRelease` or `Release.gpg`). Users can install a
+  local file with `sudo apt install ./omnibuild_<version>_<arch>.deb`, or use a
+  signed repository source once one is published.
+- A static musl binary can be packaged as `Architecture: amd64` or `arm64` without
+  shared-library dependencies. The `v0.1.1` release only has an x86-64 musl asset,
+  so `v0.1.1` packaging is `amd64`-only.
+- Unsigned repositories are not acceptable for normal `apt` use. A test repository
+  may use `[trusted=yes]`, but documentation must label that as insecure.
+
+### macOS Homebrew
+
+- Homebrew formulas live in a tap (`<owner>/homebrew-<tap>`) or Homebrew core.
+  A tap is the appropriate path for this project now: the license is custom
+  source-available, and Homebrew core has stricter licensing/notability rules.
+- A formula declares a URL and SHA-256. Architecture-specific artifacts use
+  `on_arm`/`on_intel` or `depends_on arch:`. Because `v0.1.1` has only an ARM64
+  macOS archive, the formula is explicitly ARM64-only.
+- The archive is ad-hoc signed, not Developer ID signed or notarized. The formula
+  can install it, but it must not claim notarized distribution.
+
+### Windows `winget`
+
+- Winget uses versioned multi-file YAML manifests: version, installer and default
+  locale. Schema `1.10.0` supports `InstallerType: zip`,
+  `NestedInstallerType: portable`, `NestedInstallerFiles` and
+  `PortableCommandAlias`.
+- The current Windows archive contains `omnibuild.exe` at the ZIP root, so the
+  nested installer path is `omnibuild.exe`.
+- Distribution requires a pull request to `microsoft/winget-pkgs` (or a
+  `wingetcreate` submission). The manifest must use the exact release URL and
+  SHA-256, and the package identifier must be stable.
+
+### Windows `scoop`
+
+- A Scoop manifest is JSON. It can use `checkver.github` and `autoupdate` to track
+  GitHub releases.
+- The archive root contains `omnibuild.exe`, so `bin` is `omnibuild.exe` and no
+  `extract_dir` is needed.
+- The manifest is installed through a bucket repository. A personal bucket is the
+  practical path for this project.
+
+### Windows Chocolatey
+
+- A Chocolatey package is a `.nuspec` plus scripts under `tools/`.
+- `chocolateyInstall.ps1` downloads the release ZIP, verifies a SHA-256 checksum,
+  extracts it, and creates a shim. The checksum is mandatory.
+- Chocolatey validation discourages raw GitHub `iconUrl` values; this package
+  simply omits an icon URL. The license must be represented with `licenseUrl`.
+- Publication means `choco pack` followed by `choco push` to
+  `https://push.chocolatey.org/` with an API key. That is an external action.
+
+## C. Release-asset gaps
+
+The implementation must not fabricate assets. Current gaps for full coverage:
+
+- No `linux-x86_64` glibc archive. The static musl archive is sufficient for the
+  `.deb`, but a glibc asset would be needed for a conventional dynamically linked
+  Linux package.
+- No `linux-aarch64` archive, so there is no `arm64` `.deb` from `v0.1.1`.
+- No `x86_64-apple-darwin` archive, so the Homebrew formula is ARM64-only.
+- No Windows ARM64 archive, so winget/Scoop/Chocolatey are x64-only.
+
+A future release workflow should build native Linux glibc assets on Ubuntu and
+Ubuntu ARM runners, plus an Intel macOS asset, before claiming full matrix support.
+
+## D. Implementation in this repository
+
+- `packaging/termux/omnibuild/build.sh`: Termux recipe for the `v0.1.1` source
+  tarball.
+- `packaging/debian/build-deb.sh`, `control.in`, `copyright`: local `.deb`
+  builder for the static musl binary.
+- `packaging/apt/build-apt-repo.sh`: creates `pool/`, `Packages`, `Packages.gz`,
+  `Release`, and signs `InRelease`/`Release.gpg` when a GPG key is provided.
+- `packaging/homebrew/omnibuild.rb`: ARM64 tap formula.
+- `packaging/winget/manifests/.../0.1.1/`: version, installer and `en-US` locale
+  manifests for the Windows ZIP.
+- `packaging/scoop/omnibuild.json`: bucket manifest with `checkver` and
+  `autoupdate`.
+- `packaging/chocolatey/`: nuspec, install script and uninstall script.
+- `packaging/README.md`: publication steps and exact external requirements.
+- `scripts/verify-packaging.py`: checks version/hash consistency across all recipes.
+- `.github/workflows/packages.yml`: manual workflow to download a release, verify its
+  `SHA256SUMS`, assets and source tarball, and build `.deb`/`.nupkg`/apt repository
+  artifacts. It installs the generated `.deb` and local Homebrew formula and runs
+  `omnibuild --version` plus `omnibuild doctor`; the Chocolatey job does the same. It
+  optionally attaches only the `.deb` and `.nupkg` files to the release; the apt
+  repository remains an artifact for hosting. It does not submit to external package
+  registries.
+- The checked-in manifests target the published `v0.1.1` flat release assets: the
+  binary and docs are at the archive root, and names are
+  `omnibuild-<version>-<target>`. The generic `omnibuild package` archive producer uses
+  `artifact/<binary>` and `omnibuild-<target>-<version>` names. A future automated
+  release must either keep the flat version-target layout or update every manifest,
+  the verifier and the workflows together.
+
+## E. Publication gates and external requirements
+
+The following are intentionally outside the repository:
+
+1. Termux: open a PR to `termux/termux-packages`, or publish a signed self-hosted
+   repository and document its source line.
+2. apt: publish the generated repository on HTTPS (GitHub Pages or another host),
+   sign it with a protected GPG key, and document the `signed-by` keyring.
+3. Homebrew: create `mukesh-craft/homebrew-omnibuild`, add the formula under
+   `Formula/omnibuild.rb`, and verify `brew audit`/`brew install` on an ARM Mac.
+4. winget: submit the manifests to `microsoft/winget-pkgs`; wait for validation.
+5. Scoop: create/publish a bucket repository and test `scoop install`.
+6. Chocolatey: obtain a Chocolatey API key, push the `.nupkg`, and wait for
+   moderation.
+
+No package should be documented as available until an install-and-run check passes
+on the target platform. Building a package locally is evidence for the package
+layout, not evidence that a registry publishes it.
+
+## F. Acceptance checks
+
+- `python3 scripts/verify-packaging.py` passes for the checked-in `v0.1.1` metadata.
+- `bash -n` passes for all shell recipes.
+- `dpkg-deb --info` and `dpkg-deb --contents` inspect the generated `.deb`.
+- `choco pack` produces `omnibuild.0.1.1.nupkg` on Windows.
+- CI installs the synthetic `.deb` through a trusted local apt repository and runs
+  `omnibuild --version` plus `omnibuild doctor`.
+- A workflow dispatch builds the package artifacts from a published release, installs the
+  generated `.deb` and local Homebrew formula, runs `--version`/`doctor`, runs the same
+  smoke checks for the Chocolatey package, and, when explicitly requested, uploads the
+  package artifacts back to that release.
+- README installation instructions distinguish available archives and in-tree
+  recipes from actually published package-manager packages.
+
+## G. Remaining external/publication work
+
+The in-repo tooling is complete for the checked-in `v0.1.1` manifests and for future
+asset generation, but the following still require external action:
+
+- **Termux official package**: submit `packaging/termux/omnibuild/build.sh` to
+  `termux/termux-packages` or publish a signed self-hosted Termux repository.
+- **APT hosting**: provide `APT_GPG_PRIVATE_KEY`/`APT_GPG_KEY_ID`, run
+  `.github/workflows/publish-apt-pages.yml`, enable GitHub Pages, and verify
+  `apt install omnibuild` from the published HTTPS source.
+- **Homebrew tap**: publish `mukesh-craft/homebrew-omnibuild` and replace the Intel
+  SHA placeholder after a `x86_64-apple-darwin` release asset exists.
+- **Winget/Scoop/Chocolatey publication**: submit manifests or bucket/package to the
+  external registries. Windows ARM64 placeholders must be replaced after a
+  `windows-arm64` asset exists.
+- **Release assets**: run `.github/workflows/release-assets.yml` for a future tag to
+  produce `linux-x86_64` (glibc), `linux-aarch64`, `x86_64-apple-darwin`, and
+  `windows-arm64` in the flat `omnibuild-<version>-<target>` layout, then refresh
+  hashes, manifests and verifier expectations.
+- **crates.io**: publish only after the release and licensing process is approved.
+
+These items are intentionally not claimed complete in this repository.

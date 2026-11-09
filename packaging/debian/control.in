@@ -1,0 +1,12 @@
+Package: omnibuild
+Version: @VERSION@
+Section: devel
+Priority: optional
+Architecture: @ARCH@
+Maintainer: mukesh-craft <mukesh-craft@users.noreply.github.com>
+Installed-Size: @SIZE@
+Homepage: https://github.com/mukesh-craft/omnibuild
+Description: local-first build orchestration and artifact verification
+ OmniBuild detects a project, plans a build for a target, invokes the
+ appropriate toolchain, inspects the result, runs it when possible, and writes
+ manifests, hashes, cache entries and release archives.

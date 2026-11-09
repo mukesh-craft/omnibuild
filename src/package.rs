@@ -75,6 +75,9 @@ pub fn run(
     if zip.path.is_none() {
         notes.push("zip not found; only .tar.gz archives were produced".to_string());
     }
+    notes.push(
+        "archives use the flat release layout: binary and docs at the archive root".to_string(),
+    );
     for result in &build_run.build.results {
         if result.status != "success" {
             continue;
@@ -87,16 +90,14 @@ pub fn run(
         let manifest_path = PathBuf::from(manifest_path);
         let stage = packages_dir.join(".stage").join(&result.target);
         let _ = fs::remove_dir_all(&stage);
-        let stage_artifact = stage.join("artifact");
-        fs::create_dir_all(&stage_artifact)
-            .with_context(|| format!("cannot create {}", stage_artifact.display()))?;
+        fs::create_dir_all(&stage).with_context(|| format!("cannot create {}", stage.display()))?;
 
         let artifact_path = PathBuf::from(&artifact.path);
         let artifact_name = artifact_path
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| anyhow!("artifact has no file name: {}", artifact.path))?;
-        let staged_artifact = stage_artifact.join(artifact_name);
+        let staged_artifact = stage.join(artifact_name);
         fs::copy(&artifact_path, &staged_artifact).with_context(|| {
             format!(
                 "cannot stage artifact {} into {}",
@@ -123,22 +124,52 @@ pub fn run(
             )
         })?;
 
-        let artifact_sha = verify::sha256_file(&staged_artifact)?;
-        let manifest_sha = verify::sha256_file(&staged_manifest)?;
-        let release_sha = verify::sha256_file(&staged_release)?;
-        let sums = format!(
-            "{artifact_sha}  artifact/{artifact_name}\n\
-             {manifest_sha}  manifest.json\n\
-             {release_sha}  release.json\n"
-        );
+        for name in ["README.md", "LICENSE", "COPYING", "scripts/run-macos.sh"] {
+            let src = source.join(name);
+            if src.is_file() {
+                let dest = stage.join(name);
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("cannot create {}", parent.display()))?;
+                }
+                fs::copy(&src, &dest).with_context(|| {
+                    format!("cannot stage {} into {}", src.display(), dest.display())
+                })?;
+            }
+        }
+
+        let mut sum_entries = vec![
+            (
+                verify::sha256_file(&staged_artifact)?,
+                artifact_name.to_string(),
+            ),
+            (
+                verify::sha256_file(&staged_manifest)?,
+                "manifest.json".to_string(),
+            ),
+            (
+                verify::sha256_file(&staged_release)?,
+                "release.json".to_string(),
+            ),
+        ];
+        for name in ["LICENSE", "COPYING", "README.md", "scripts/run-macos.sh"] {
+            let path = stage.join(name);
+            if path.is_file() {
+                sum_entries.push((verify::sha256_file(&path)?, name.to_string()));
+            }
+        }
+        sum_entries.sort_by(|a, b| a.1.cmp(&b.1));
+        let sums = sum_entries
+            .iter()
+            .map(|(hash, name)| format!("{hash}  {name}\n"))
+            .collect::<String>();
         fs::write(stage.join("SHA256SUMS"), sums)
             .with_context(|| format!("cannot write checksums under {}", stage.display()))?;
 
         let archive_path = packages_dir.join(format!(
-            "{}-{}-{}.tar.gz",
-            sanitize(&build_run.build.project),
-            sanitize(&result.target),
-            env!("CARGO_PKG_VERSION")
+            "omnibuild-{}-{}.tar.gz",
+            env!("CARGO_PKG_VERSION"),
+            sanitize(&result.target)
         ));
         let _ = fs::remove_file(&archive_path);
         let tar_log = packages_dir.join(format!("{}.tar.log", sanitize(&result.target)));
@@ -175,10 +206,9 @@ pub fn run(
 
         if let Some(zip_path) = zip.path.as_ref() {
             let zip_archive = packages_dir.join(format!(
-                "{}-{}-{}.zip",
-                sanitize(&build_run.build.project),
-                sanitize(&result.target),
-                env!("CARGO_PKG_VERSION")
+                "omnibuild-{}-{}.zip",
+                env!("CARGO_PKG_VERSION"),
+                sanitize(&result.target)
             ));
             let _ = fs::remove_file(&zip_archive);
             let zip_log = packages_dir.join(format!("{}.zip.log", sanitize(&result.target)));

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>omnibuild</id>
+    <version>0.1.1</version>
+    <title>OmniBuild</title>
+    <authors>mukesh-craft</authors>
+    <owners>mukesh-craft</owners>
+    <projectUrl>https://github.com/mukesh-craft/omnibuild</projectUrl>
+    <packageSourceUrl>https://github.com/mukesh-craft/omnibuild/tree/main/packaging/chocolatey</packageSourceUrl>
+    <projectSourceUrl>https://github.com/mukesh-craft/omnibuild</projectSourceUrl>
+    <docsUrl>https://github.com/mukesh-craft/omnibuild/blob/main/README.md</docsUrl>
+    <bugTrackerUrl>https://github.com/mukesh-craft/omnibuild/issues</bugTrackerUrl>
+    <licenseUrl>https://github.com/mukesh-craft/omnibuild/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <copyright>Copyright (c) 2026 The OmniBuild Authors</copyright>
+    <tags>build cross-compilation artifact-verification cli</tags>
+    <summary>Local-first build orchestration and artifact verification</summary>
+    <description>OmniBuild detects a project, plans a build for a target, invokes the appropriate toolchain, inspects the result, runs it when possible, and writes manifests, hashes, cache entries and release archives. It records whether an artifact was built, inspected or actually executed.</description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
